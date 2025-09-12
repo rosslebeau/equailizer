@@ -1,0 +1,11 @@
+{
+	"creditor": {
+		"api_key": "xxx",
+		"proxy_category_id": 11217,
+		"repayment_account_id": 1024
+	},
+	"debtor": {
+		"api_key": "xxx",
+		"repayment_account_id": 1337
+	}
+}
