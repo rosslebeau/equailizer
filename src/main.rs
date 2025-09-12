@@ -2,6 +2,7 @@ mod cli;
 mod commands;
 mod config;
 mod lunch_money;
+pub mod usd;
 
 use clap::Parser;
 

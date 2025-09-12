@@ -1,4 +1,5 @@
 use crate::config::{self, *};
+use crate::usd::USD;
 use crate::{
     lunch_money, lunch_money::api::update_transaction, lunch_money::api::update_transaction::Split,
     lunch_money::model::transaction::*,
@@ -38,7 +39,6 @@ pub async fn run(
         if tag_names.contains(&config::TAG_BATCH_SPLIT.into()) {
             let (creditor_amt, debtor_amt) = random_even_split(txn.amount);
 
-            // TODO: (bug) this should make sure to keep the category of the creditor's split the same as the category of the parent transaction it is splitting from.
             let splits =
                 create_splits_for_batch(creditor_amt, debtor_amt, batch_label.to_owned(), config);
             let txn_update = update_transaction::TransactionUpdate {
@@ -53,7 +53,6 @@ pub async fn run(
                 .await?;
             batch_total = batch_total + debtor_amt;
         } else if tag_names.contains(&config::TAG_BATCH_ADD.into()) {
-            // TODO: (bug) this should make sure to set the transaction category to the creditor's proxy category
             let txn_update = update_transaction::TransactionUpdate {
                 payee: None,
                 notes: Some(batch_label.to_owned()),
@@ -117,7 +116,6 @@ fn create_splits_for_batch(
 }
 
 fn tags_by_removing_tag(txn: &Transaction, tag_to_remove: String) -> Vec<String> {
-    // let x = txn.tags.into_iter().filter(|t| true);
     txn.tags
         .iter()
         .filter(|t| (**t).name != tag_to_remove)

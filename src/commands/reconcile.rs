@@ -1,6 +1,7 @@
 use crate::config::{self, Config, eq_batch_name};
 use crate::lunch_money::api::update_transaction::{Split, TransactionUpdate};
 use crate::lunch_money::model::transaction::{self, *};
+use crate::usd::USD;
 use chrono::NaiveDate;
 use rust_decimal::prelude::*;
 use uuid::{self, Uuid};

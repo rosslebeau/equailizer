@@ -1,6 +1,7 @@
 use super::Client;
 use crate::lunch_money::model::transaction::Id as TransactionId;
 use crate::lunch_money::model::transaction::{self, *};
+use crate::usd::USD;
 use serde::{Deserialize, Serialize};
 
 // This model is only used to perform this split action
