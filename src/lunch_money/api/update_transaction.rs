@@ -22,8 +22,6 @@ pub struct Split {
 
 #[derive(Debug, Serialize)]
 pub struct TransactionUpdate {
-    pub transaction_id: transaction::Id,
-
     #[serde(skip_serializing_if = "Option::is_none")]
     pub payee: Option<String>,
 
@@ -58,9 +56,10 @@ pub enum UpdateTransactionResponse {
 impl Client {
     pub async fn update_txn_only(
         &self,
+        txn_id: TransactionId,
         txn_update: TransactionUpdate,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        self.update(None, Some(txn_update), None).await
+        self.update(txn_id, Some(txn_update), None).await
     }
 
     pub async fn update_split_only(
@@ -68,20 +67,21 @@ impl Client {
         txn_id: TransactionId,
         splits: Vec<Split>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        self.update(Some(txn_id), None, Some(splits)).await
+        self.update(txn_id, None, Some(splits)).await
     }
 
     pub async fn update_txn_and_split(
         &self,
+        txn_id: TransactionId,
         txn_update: TransactionUpdate,
         splits: Vec<Split>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        self.update(None, Some(txn_update), Some(splits)).await
+        self.update(txn_id, Some(txn_update), Some(splits)).await
     }
 
     async fn update(
         &self,
-        txn_id: Option<TransactionId>,
+        txn_id: TransactionId,
         txn_update: Option<TransactionUpdate>,
         splits: Option<Vec<Split>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
@@ -94,18 +94,18 @@ impl Client {
             split: Option<Vec<Split>>,
         }
 
-        let txn_id = match (txn_id, &txn_update) {
-            (None, None) => {
-                return Err(
-                    "cannot update transaction without either id or transaction update item".into(),
-                );
-            }
-            (Some(_), Some(_)) => {
-                return Err("should not ever get both a txn_id and a txn_update".into());
-            }
-            (Some(id), None) => id,
-            (None, Some(update)) => update.transaction_id,
-        };
+        // let txn_id = match (txn_id, &txn_update) {
+        //     (None, None) => {
+        //         return Err(
+        //             "cannot update transaction without either id or transaction update item".into(),
+        //         );
+        //     }
+        //     (Some(_), Some(_)) => {
+        //         return Err("should not ever get both a txn_id and a txn_update".into());
+        //     }
+        //     (Some(id), None) => id,
+        //     (None, Some(update)) => update.transaction_id,
+        // };
 
         let txn_update_body = match (txn_update, splits) {
             (None, None) => return Err("txn_update and splits cannot both be None".into()),

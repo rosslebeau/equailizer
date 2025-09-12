@@ -42,7 +42,6 @@ pub async fn run(
             let splits =
                 create_splits_for_batch(creditor_amt, debtor_amt, batch_label.to_owned(), config);
             let txn_update = update_transaction::TransactionUpdate {
-                transaction_id: txn.id,
                 payee: None,
                 notes: None,
                 tags: Some(tags_by_removing_tag(&txn, config::TAG_BATCH_SPLIT.into())),
@@ -50,20 +49,21 @@ pub async fn run(
             };
 
             lm_creditor_client
-                .update_txn_and_split(txn_update, splits)
+                .update_txn_and_split(txn.id, txn_update, splits)
                 .await?;
             batch_total = batch_total + debtor_amt;
         } else if tag_names.contains(&config::TAG_BATCH_ADD.into()) {
             // TODO: (bug) this should make sure to set the transaction category to the creditor's proxy category
             let txn_update = update_transaction::TransactionUpdate {
-                transaction_id: txn.id,
                 payee: None,
                 notes: Some(batch_label.to_owned()),
                 tags: Some(tags_by_removing_tag(&txn, config::TAG_BATCH_ADD.into())),
                 status: Some(TransactionStatus::Cleared),
             };
 
-            lm_creditor_client.update_txn_only(txn_update).await?;
+            lm_creditor_client
+                .update_txn_only(txn.id, txn_update)
+                .await?;
             batch_total = batch_total + txn.amount;
         }
     }

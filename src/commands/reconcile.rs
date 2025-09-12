@@ -28,13 +28,12 @@ pub async fn run(
     };
 
     let txn_update = TransactionUpdate {
-        transaction_id: creditor_data.repayment_txn.id,
         payee: None,
         notes: None,
         tags: None,
         status: Some(TransactionStatus::Cleared),
     };
-    lm_creditor_client.update_txn_only(txn_update);
+    lm_creditor_client.update_txn_only(creditor_data.repayment_txn.id, txn_update);
 
     let debtor_repayment_txn =
         get_debtor_repayment_txn(config, batch_id, start_date, end_date).await?;
