@@ -120,6 +120,7 @@ fn get_debtor_splits(creditor_proxy_txns: &Vec<Transaction>) -> Vec<Split> {
                 payee: Some(t.payee.to_owned()),
                 category_id: None,
                 notes: None,
+                date: Some(t.date),
             }
         })
         .collect()

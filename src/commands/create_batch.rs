@@ -107,12 +107,14 @@ fn create_splits_for_batch(
         payee: None,
         category_id: None,
         notes: None,
+        date: None,
     };
     let debtor_split = lunch_money::api::update_transaction::Split {
         amount: debtor_amt,
         payee: None,
         category_id: Some(config.creditor.proxy_category_id),
         notes: Some(batch_label),
+        date: None,
     };
     return vec![creditor_split, debtor_split];
 }

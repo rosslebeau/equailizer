@@ -2,6 +2,7 @@ use super::Client;
 use crate::lunch_money::model::transaction::Id as TransactionId;
 use crate::lunch_money::model::transaction::*;
 use crate::usd::USD;
+use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 
 // This model is only used to perform this split action
@@ -17,8 +18,9 @@ pub struct Split {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
-    // Not adding this now as I don't need it yet, but keeping it in the file so I know it's there if I need it later.
-    // date: Option<NaiveDate>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub date: Option<NaiveDate>,
 }
 
 #[derive(Debug, Serialize)]
