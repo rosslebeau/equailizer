@@ -1,6 +1,6 @@
 use super::Client;
 use crate::lunch_money::model::transaction::Id as TransactionId;
-use crate::lunch_money::model::transaction::{self, *};
+use crate::lunch_money::model::transaction::*;
 use crate::usd::USD;
 use serde::{Deserialize, Serialize};
 
@@ -37,19 +37,20 @@ pub struct TransactionUpdate {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct UpdateTransactionSuccess {
-    pub updated: bool,
-    pub split: Option<Vec<TransactionId>>,
+struct UpdateTransactionSuccess {
+    updated: bool,
+    #[allow(dead_code)]
+    split: Option<Vec<TransactionId>>,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct UpdateTransactionError {
-    pub error: Vec<String>,
+struct UpdateTransactionError {
+    error: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
-pub enum UpdateTransactionResponse {
+enum UpdateTransactionResponse {
     Success(UpdateTransactionSuccess),
     Error(UpdateTransactionError),
 }
@@ -95,19 +96,6 @@ impl Client {
             split: Option<Vec<Split>>,
         }
 
-        // let txn_id = match (txn_id, &txn_update) {
-        //     (None, None) => {
-        //         return Err(
-        //             "cannot update transaction without either id or transaction update item".into(),
-        //         );
-        //     }
-        //     (Some(_), Some(_)) => {
-        //         return Err("should not ever get both a txn_id and a txn_update".into());
-        //     }
-        //     (Some(id), None) => id,
-        //     (None, Some(update)) => update.transaction_id,
-        // };
-
         let txn_update_body = match (txn_update, splits) {
             (None, None) => return Err("txn_update and splits cannot both be None".into()),
             (a, b) => UpdateTransactionRequestBody {
@@ -116,36 +104,8 @@ impl Client {
             },
         };
 
-        let auth_header = format!("Bearer {}", self.auth_token);
-
-        // TEST CODE
-
-        // let client = reqwest::Client::new();
-        // let url = format!("https://dev.lunchmoney.app/v1/transactions/:{}", txn_id);
-        // let req_b = client
-        //     .put(url)
-        //     .header("Authorization", auth_header)
-        //     .json(&txn_update_body)
-        //     .build();
-
-        // let req = match req_b {
-        //     Ok(r) => r,
-        //     Err(_) => return Ok(()),
-        // };
-
-        // let json: String = serde_json::to_string_pretty(&txn_update_body).expect("JSON ERR");
-        // println!(
-        //     "updating with\nURL: {:?}\nHeaders: {:?}\nBody: {:?}",
-        //     req.url(),
-        //     req.headers(),
-        //     json
-        // );
-
-        // return Ok(());
-
-        //END TEST CODE
-
         let client = reqwest::Client::new();
+        let auth_header = format!("Bearer {}", self.auth_token);
         let url = format!("https://dev.lunchmoney.app/v1/transactions/{}", txn_id);
         let response = client
             .put(url)
@@ -155,7 +115,6 @@ impl Client {
             .await?;
 
         let http_code = response.status();
-
         let result: UpdateTransactionResponse = response.json().await?;
 
         match result {

@@ -15,9 +15,9 @@ pub struct SuccessResult {
 }
 
 pub async fn run(
-    config: &Config,
     start_date: NaiveDate,
     end_date: NaiveDate,
+    config: &Config,
 ) -> Result<SuccessResult, Box<dyn std::error::Error>> {
     if start_date.cmp(&end_date) == std::cmp::Ordering::Greater {
         return Err("start date cannot be after end date".into());
@@ -41,6 +41,7 @@ pub async fn run(
 
             let splits =
                 create_splits_for_batch(creditor_amt, debtor_amt, batch_label.to_owned(), config);
+
             let txn_update = update_transaction::TransactionUpdate {
                 payee: None,
                 notes: None,
@@ -51,6 +52,7 @@ pub async fn run(
             lm_creditor_client
                 .update_txn_and_split(txn.id, txn_update, splits)
                 .await?;
+
             batch_total = batch_total + debtor_amt;
         } else if tag_names.contains(&config::TAG_BATCH_ADD.into()) {
             let txn_update = update_transaction::TransactionUpdate {
