@@ -12,15 +12,15 @@ struct CreditorBatch {
 }
 
 pub async fn run(
-    batch_id: Uuid,
+    batch_name: &String,
     start_date: NaiveDate,
     end_date: NaiveDate,
     config: &Config,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let batch_name = eq_batch_name(batch_id);
     let lm_creditor_client = crate::lunch_money::api::Client {
         auth_token: config.creditor.api_key.to_owned(),
     };
+
     let creditor_txns = lm_creditor_client
         .get_transactions(start_date, end_date)
         .await?;
@@ -79,14 +79,19 @@ async fn get_creditor_batch_from_txns(
     batch_name: &String,
     config: &Config,
 ) -> Result<CreditorBatch, Box<dyn std::error::Error>> {
-    txns.retain(|t| t.payee.contains(batch_name));
+    // Look for transactions that have the batch name in either:
+    // - the payee (repayment txn), or
+    // - the notes (previously batched proxy txns)
+    txns.retain(|t| {
+        t.payee.contains(batch_name) || t.notes.as_ref().is_some_and(|n| n.contains(batch_name))
+    });
+    println!("txns after retain: {:?}", txns);
 
-    // Find the first transaction on the repayment account that has this batch name and remove it from the vec
+    // Find the first transaction on the repayment account that has this batch name and a negative amount remove it from the vec
     // There should only be one, we'll check the balance of the batch later
-    let repayment_txn = match txns
-        .iter()
-        .position(|t| is_in_acct(t, config.creditor.repayment_account_id))
-    {
+    let repayment_txn = match txns.iter().position(|t| {
+        is_in_acct(t, config.creditor.repayment_account_id) && t.amount.value() < dec!(0)
+    }) {
         Some(position) => txns.swap_remove(position),
         None => return Err("didn't find repayment transaction".into()),
     };

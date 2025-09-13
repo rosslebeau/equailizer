@@ -29,8 +29,13 @@ pub enum Commands {
         end_date: NaiveDate,
     },
     Reconcile {
-        #[arg(required = true, long = "batch-id", short = 'b', value_name = "uuid")]
-        batch_id: Uuid,
+        #[arg(
+            required = true,
+            long = "batch-name",
+            short = 'b',
+            value_name = "batch name"
+        )]
+        batch_name: String,
         #[arg(
             required = true,
             long = "start-date",

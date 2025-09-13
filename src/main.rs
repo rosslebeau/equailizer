@@ -34,16 +34,13 @@ async fn main() {
             }
         }
         cli::Commands::Reconcile {
-            batch_id,
+            batch_name,
             start_date,
             end_date,
         } => {
-            let result = commands::reconcile::run(batch_id, start_date, end_date, &config).await;
+            let result = commands::reconcile::run(&batch_name, start_date, end_date, &config).await;
             match result {
-                Ok(()) => println!(
-                    "Successfully reconciled batch: {}",
-                    config::eq_batch_name(batch_id)
-                ),
+                Ok(()) => println!("Successfully reconciled batch: {}", batch_name),
                 Err(e) => println!("Creating batch failed with error: {}", e),
             }
         }

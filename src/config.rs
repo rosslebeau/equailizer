@@ -6,7 +6,7 @@ pub const TAG_BATCH_SPLIT: &str = "eq-to-split";
 pub const TAG_BATCH_ADD: &str = "eq-to-batch";
 
 pub fn eq_batch_name(from_uuid: Uuid) -> String {
-    format!("eq<{from_uuid}>")
+    format!("eq{from_uuid}")
 }
 
 #[derive(Debug, Deserialize)]

@@ -106,6 +106,9 @@ impl Client {
             },
         };
 
+        println!("\nupdating with body:\n{:?}", txn_update_body);
+        return Ok(());
+
         let client = reqwest::Client::new();
         let auth_header = format!("Bearer {}", self.auth_token);
         let url = format!("https://dev.lunchmoney.app/v1/transactions/{}", txn_id);
