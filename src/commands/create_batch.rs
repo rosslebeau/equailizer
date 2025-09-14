@@ -37,35 +37,39 @@ pub async fn run(
     for txn in txns {
         let tag_names: Vec<String> = txn.tags.iter().map(|t| t.name.to_owned()).collect();
         if tag_names.contains(&config::TAG_BATCH_SPLIT.into()) {
-            let (creditor_amt, debtor_amt) = random_even_split(txn.amount);
+            let splits = create_random_even_splits(&txn, &batch_label, config);
 
-            let splits =
-                create_splits_for_batch(creditor_amt, debtor_amt, batch_label.to_owned(), config);
+            batch_total = batch_total + splits.debtor_split.amount;
 
             let txn_update = update_transaction::TransactionUpdate {
                 payee: None,
+                category_id: None,
                 notes: None,
                 tags: Some(tags_by_removing_tag(&txn, config::TAG_BATCH_SPLIT.into())),
                 status: Some(TransactionStatus::Cleared),
             };
 
             lm_creditor_client
-                .update_txn_and_split(txn.id, txn_update, splits)
+                .update_txn_and_split(
+                    txn.id,
+                    &txn_update,
+                    &vec![splits.creditor_split, splits.debtor_split],
+                )
                 .await?;
-
-            batch_total = batch_total + debtor_amt;
         } else if tag_names.contains(&config::TAG_BATCH_ADD.into()) {
+            batch_total = batch_total + txn.amount;
+
             let txn_update = update_transaction::TransactionUpdate {
                 payee: None,
+                category_id: Some(config.creditor.proxy_category_id),
                 notes: Some(batch_label.to_owned()),
                 tags: Some(tags_by_removing_tag(&txn, config::TAG_BATCH_ADD.into())),
                 status: Some(TransactionStatus::Cleared),
             };
 
             lm_creditor_client
-                .update_txn_only(txn.id, txn_update)
+                .update_txn_only(txn.id, &txn_update)
                 .await?;
-            batch_total = batch_total + txn.amount;
         }
     }
 
@@ -96,16 +100,22 @@ fn random_even_split(amt: USD) -> (USD, USD) {
     }
 }
 
-fn create_splits_for_batch(
-    creditor_amt: USD,
-    debtor_amt: USD,
-    batch_label: String,
+struct EvenSplit {
+    creditor_split: Split,
+    debtor_split: Split,
+}
+
+fn create_random_even_splits(
+    txn: &Transaction,
+    batch_label: &String,
     config: &Config,
-) -> Vec<Split> {
+) -> EvenSplit {
+    let (creditor_amt, debtor_amt) = random_even_split(txn.amount);
+
     let creditor_split = lunch_money::api::update_transaction::Split {
         amount: creditor_amt,
         payee: None,
-        category_id: None,
+        category_id: txn.category_id,
         notes: None,
         date: None,
     };
@@ -113,10 +123,13 @@ fn create_splits_for_batch(
         amount: debtor_amt,
         payee: None,
         category_id: Some(config.creditor.proxy_category_id),
-        notes: Some(batch_label),
+        notes: Some(batch_label.to_owned()),
         date: None,
     };
-    return vec![creditor_split, debtor_split];
+    return EvenSplit {
+        creditor_split: creditor_split,
+        debtor_split: debtor_split,
+    };
 }
 
 fn tags_by_removing_tag(txn: &Transaction, tag_to_remove: String) -> Vec<String> {

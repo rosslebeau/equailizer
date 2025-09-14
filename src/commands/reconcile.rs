@@ -37,14 +37,15 @@ pub async fn run(
         return Err("batch total is not equal to repayment transaction".into());
     }
 
-    let txn_update = TransactionUpdate {
+    let repayment_txn_update = TransactionUpdate {
         payee: None,
+        category_id: Some(config.creditor.proxy_category_id),
         notes: None,
         tags: None,
         status: Some(TransactionStatus::Cleared),
     };
     lm_creditor_client
-        .update_txn_only(creditor_batch.repayment_txn.id, txn_update)
+        .update_txn_only(creditor_batch.repayment_txn.id, &repayment_txn_update)
         .await?;
 
     let lm_debtor_client = crate::lunch_money::api::Client {
@@ -61,7 +62,7 @@ pub async fn run(
     let debtor_splits: Vec<Split> = get_debtor_splits(&creditor_batch.proxy_txns);
 
     lm_debtor_client
-        .update_split_only(debtor_repayment_txn.id, debtor_splits)
+        .update_split_only(debtor_repayment_txn.id, &debtor_splits)
         .await?;
 
     return Ok(());

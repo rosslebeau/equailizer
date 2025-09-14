@@ -29,6 +29,9 @@ pub struct TransactionUpdate {
     pub payee: Option<String>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub category_id: Option<u32>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -61,7 +64,7 @@ impl Client {
     pub async fn update_txn_only(
         &self,
         txn_id: TransactionId,
-        txn_update: TransactionUpdate,
+        txn_update: &TransactionUpdate,
     ) -> Result<(), Box<dyn std::error::Error>> {
         self.update(txn_id, Some(txn_update), None).await
     }
@@ -69,7 +72,7 @@ impl Client {
     pub async fn update_split_only(
         &self,
         txn_id: TransactionId,
-        splits: Vec<Split>,
+        splits: &Vec<Split>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         self.update(txn_id, None, Some(splits)).await
     }
@@ -77,8 +80,8 @@ impl Client {
     pub async fn update_txn_and_split(
         &self,
         txn_id: TransactionId,
-        txn_update: TransactionUpdate,
-        splits: Vec<Split>,
+        txn_update: &TransactionUpdate,
+        splits: &Vec<Split>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         self.update(txn_id, Some(txn_update), Some(splits)).await
     }
@@ -86,23 +89,23 @@ impl Client {
     async fn update(
         &self,
         txn_id: TransactionId,
-        txn_update: Option<TransactionUpdate>,
-        splits: Option<Vec<Split>>,
+        txn_update: Option<&TransactionUpdate>,
+        splits: Option<&Vec<Split>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         #[derive(Debug, Serialize)]
-        struct UpdateTransactionRequestBody {
+        struct RequestBodySource<'a> {
             #[serde(skip_serializing_if = "Option::is_none")]
-            transaction: Option<TransactionUpdate>,
+            transaction: Option<&'a TransactionUpdate>,
 
             #[serde(skip_serializing_if = "Option::is_none")]
-            split: Option<Vec<Split>>,
+            split: Option<&'a Vec<Split>>,
         }
 
         let txn_update_body = match (txn_update, splits) {
             (None, None) => return Err("txn_update and splits cannot both be None".into()),
-            (a, b) => UpdateTransactionRequestBody {
-                transaction: a,
-                split: b,
+            (txn_update, splits) => RequestBodySource {
+                transaction: txn_update,
+                split: splits,
             },
         };
 
