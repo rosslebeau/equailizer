@@ -16,6 +16,7 @@ pub struct Transaction {
     pub tags: Vec<Tag>,
     pub notes: Option<String>,
     pub status: TransactionStatus,
+    pub original_name: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

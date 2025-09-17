@@ -1,10 +1,9 @@
-use crate::config::{Config, eq_batch_name};
+use crate::config::Config;
 use crate::lunch_money::api::update_transaction::{Split, TransactionUpdate};
 use crate::lunch_money::model::transaction::*;
 use crate::usd::USD;
 use chrono::NaiveDate;
 use rust_decimal::prelude::*;
-use uuid::{self, Uuid};
 
 struct CreditorBatch {
     repayment_txn: Transaction,
@@ -40,7 +39,7 @@ pub async fn run(
     let repayment_txn_update = TransactionUpdate {
         payee: None,
         category_id: Some(config.creditor.proxy_category_id),
-        notes: None,
+        notes: Some(batch_name.to_owned()),
         tags: None,
         status: Some(TransactionStatus::Cleared),
     };
@@ -61,8 +60,16 @@ pub async fn run(
     // create splits on debtor's side to pass through the payees so they can categorize
     let debtor_splits: Vec<Split> = get_debtor_splits(&creditor_batch.proxy_txns);
 
+    let debtor_txn_update = TransactionUpdate {
+        payee: None,
+        category_id: None,
+        notes: Some(batch_name.to_owned()),
+        tags: None,
+        status: None,
+    };
+
     lm_debtor_client
-        .update_split_only(debtor_repayment_txn.id, &debtor_splits)
+        .update_txn_and_split(debtor_repayment_txn.id, &debtor_txn_update, &debtor_splits)
         .await?;
 
     return Ok(());
@@ -86,7 +93,6 @@ async fn get_creditor_batch_from_txns(
     txns.retain(|t| {
         t.payee.contains(batch_name) || t.notes.as_ref().is_some_and(|n| n.contains(batch_name))
     });
-    println!("txns after retain: {:?}", txns);
 
     // Find the first transaction on the repayment account that has this batch name and a negative amount remove it from the vec
     // There should only be one, we'll check the balance of the batch later
@@ -94,7 +100,7 @@ async fn get_creditor_batch_from_txns(
         is_in_acct(t, config.creditor.repayment_account_id) && t.amount.value() < dec!(0)
     }) {
         Some(position) => txns.swap_remove(position),
-        None => return Err("didn't find repayment transaction".into()),
+        None => return Err("didn't find creditor repayment transaction".into()),
     };
 
     return Ok(CreditorBatch {
@@ -108,13 +114,23 @@ fn get_debtor_repayment_txn_from_txns(
     batch_name: &String,
     config: &Config,
 ) -> Result<Transaction, Box<dyn std::error::Error>> {
-    if let Some(position) = txns.iter().position(|t| {
-        t.payee.contains(batch_name) && is_in_acct(t, config.debtor.repayment_account_id)
-    }) {
+    if let Some(position) = txns
+        .iter()
+        .position(|t| matches_debtor_txn(t, batch_name, config))
+    {
         return Ok(txns.swap_remove(position));
     } else {
         return Err("didn't find debtor repayment transaction".into());
     }
+}
+
+fn matches_debtor_txn(txn: &Transaction, batch_name: &String, config: &Config) -> bool {
+    is_in_acct(txn, config.debtor.repayment_account_id)
+        && (txn.payee.contains(batch_name)
+            || txn
+                .original_name
+                .as_ref()
+                .is_some_and(|x| x.contains(batch_name)))
 }
 
 fn get_debtor_splits(creditor_proxy_txns: &Vec<Transaction>) -> Vec<Split> {

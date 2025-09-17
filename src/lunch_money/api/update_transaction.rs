@@ -69,6 +69,7 @@ impl Client {
         self.update(txn_id, Some(txn_update), None).await
     }
 
+    #[allow(dead_code)]
     pub async fn update_split_only(
         &self,
         txn_id: TransactionId,
@@ -108,9 +109,6 @@ impl Client {
                 split: splits,
             },
         };
-
-        println!("\nupdating with body:\n{:?}", txn_update_body);
-        return Ok(());
 
         let client = reqwest::Client::new();
         let auth_header = format!("Bearer {}", self.auth_token);

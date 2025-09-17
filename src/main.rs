@@ -3,6 +3,8 @@ mod commands;
 mod config;
 mod lunch_money;
 pub mod usd;
+use chrono::NaiveDate;
+use chrono_tz::US::Eastern;
 
 use clap::Parser;
 
@@ -24,6 +26,7 @@ async fn main() {
             start_date,
             end_date,
         } => {
+            let end_date = end_date.or_naive_date_now();
             let result = commands::create_batch::run(start_date, end_date, &config).await;
             match result {
                 Ok(res) => println!(
@@ -38,11 +41,30 @@ async fn main() {
             start_date,
             end_date,
         } => {
+            let end_date = end_date.or_naive_date_now();
             let result = commands::reconcile::run(&batch_name, start_date, end_date, &config).await;
             match result {
                 Ok(()) => println!("Successfully reconciled batch: {}", batch_name),
                 Err(e) => println!("Creating batch failed with error: {}", e),
             }
+        }
+    }
+}
+
+// Use this for naive dates - I'm based in Eastern currently
+// and it's easier to just use a single reference time zone for all ops
+fn now_date_naive_eastern() -> NaiveDate {
+    chrono::Utc::now().with_timezone(&Eastern).date_naive()
+}
+
+trait DefaultDate {
+    fn or_naive_date_now(&self) -> NaiveDate;
+}
+impl DefaultDate for Option<NaiveDate> {
+    fn or_naive_date_now(&self) -> NaiveDate {
+        match self {
+            Some(e) => *e,
+            None => now_date_naive_eastern(),
         }
     }
 }

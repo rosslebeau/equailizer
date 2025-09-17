@@ -1,6 +1,5 @@
 use chrono::NaiveDate;
 use clap::{Parser, Subcommand};
-use uuid::Uuid;
 
 #[derive(Parser, Debug)]
 #[command(name = "equailizer")]
@@ -21,12 +20,12 @@ pub enum Commands {
         )]
         start_date: NaiveDate,
         #[arg(
-            required = true,
+            required = false,
             long = "end-date",
             short = 'e',
             value_name = "yyyy-mm-dd"
         )]
-        end_date: NaiveDate,
+        end_date: Option<NaiveDate>,
     },
     Reconcile {
         #[arg(
@@ -44,11 +43,11 @@ pub enum Commands {
         )]
         start_date: NaiveDate,
         #[arg(
-            required = true,
+            required = false,
             long = "end-date",
             short = 'e',
             value_name = "yyyy-mm-dd"
         )]
-        end_date: NaiveDate,
+        end_date: Option<NaiveDate>,
     },
 }
