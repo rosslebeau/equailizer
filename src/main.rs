@@ -44,10 +44,22 @@ async fn main() {
             end_date,
         } => {
             let end_date = end_date.or_naive_date_now();
-            let result = commands::reconcile::run(&batch_name, start_date, end_date, &config).await;
+            let result =
+                commands::reconcile::reconcile_batch(&batch_name, start_date, end_date, &config)
+                    .await;
             match result {
                 Ok(()) => println!("Successfully reconciled batch: {}", batch_name),
                 Err(e) => println!("Creating batch failed with error: {}", e),
+            }
+        }
+        cli::Commands::ReconcileAll {} => {
+            let result = commands::reconcile::reconcile_all(&config).await;
+            match result {
+                Ok(batch_names) => println!(
+                    "Successfully reconciled all outstanding batches:\n{}",
+                    batch_names.join("\n")
+                ),
+                Err(e) => println!("Reconciling all batches failed with error: {}", e),
             }
         }
     }

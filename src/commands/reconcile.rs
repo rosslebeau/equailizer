@@ -1,6 +1,7 @@
 use crate::config::Config;
 use crate::lunch_money::api::update_transaction::{Split, TransactionUpdate};
 use crate::lunch_money::model::transaction::*;
+use crate::persist;
 use crate::usd::USD;
 use chrono::NaiveDate;
 use rust_decimal::prelude::*;
@@ -10,7 +11,16 @@ struct CreditorBatch {
     proxy_txns: Vec<Transaction>,
 }
 
-pub async fn run(
+// On success, returns a list of reconciled batch names
+pub async fn reconcile_all(config: &Config) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    let unreconciled = persist::unreconciled_metas()?;
+    for meta in &unreconciled {
+        reconcile_batch(&meta.name, meta.start_date, meta.end_date, config).await?;
+    }
+    Ok(unreconciled.iter().map(|m| m.name.to_owned()).collect())
+}
+
+pub async fn reconcile_batch(
     batch_name: &String,
     start_date: NaiveDate,
     end_date: NaiveDate,
@@ -71,6 +81,8 @@ pub async fn run(
     lm_debtor_client
         .update_txn_and_split(debtor_repayment_txn.id, &debtor_txn_update, &debtor_splits)
         .await?;
+
+    persist::set_reconciled(&batch_name, true)?;
 
     return Ok(());
 }

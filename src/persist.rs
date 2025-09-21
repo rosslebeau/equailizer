@@ -3,11 +3,36 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 
 #[derive(Debug, Deserialize, Serialize)]
-struct BatchMetadata {
-    name: String,
-    start_date: NaiveDate,
-    end_date: NaiveDate,
-    reconciled: bool,
+pub struct BatchMetadata {
+    pub name: String,
+    pub start_date: NaiveDate,
+    pub end_date: NaiveDate,
+    pub reconciled: bool,
+}
+
+pub fn all_metas() -> Result<Vec<BatchMetadata>, Box<dyn std::error::Error>> {
+    let dir = fs::read_dir("data")?;
+    // for entry in dir {
+    //     // let entry = entry?;
+    //     let file = fs::read_to_string(entry?.path())?;
+    //     let parsed: BatchMetadata = serde_json::from_str(&file)?;
+    // }
+    return dir
+        .map(|e| {
+            let file = fs::read_to_string(e?.path())?;
+            let parsed: BatchMetadata = serde_json::from_str(&file)?;
+            return Ok(parsed);
+        })
+        .collect();
+    // Ok(vec![])
+}
+
+pub fn unreconciled_metas() -> Result<Vec<BatchMetadata>, Box<dyn std::error::Error>> {
+    all_metas()?
+        .into_iter()
+        .filter(|m| !(*m).reconciled)
+        .map(|m| Ok(m))
+        .collect()
 }
 
 pub fn metadata_for_batch(
