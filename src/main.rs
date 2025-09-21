@@ -2,7 +2,9 @@ mod cli;
 mod commands;
 mod config;
 mod lunch_money;
+mod persist;
 pub mod usd;
+
 use chrono::NaiveDate;
 use chrono_tz::US::Eastern;
 

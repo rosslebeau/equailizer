@@ -93,6 +93,7 @@ impl Client {
         txn_update: Option<&TransactionUpdate>,
         splits: Option<&Vec<Split>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        // return Ok(());
         #[derive(Debug, Serialize)]
         struct RequestBodySource<'a> {
             #[serde(skip_serializing_if = "Option::is_none")]

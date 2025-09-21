@@ -2,7 +2,7 @@ use crate::config::{self, *};
 use crate::usd::USD;
 use crate::{
     lunch_money, lunch_money::api::update_transaction, lunch_money::api::update_transaction::Split,
-    lunch_money::model::transaction::*,
+    lunch_money::model::transaction::*, persist,
 };
 use chrono::NaiveDate;
 use rand::random_bool;
@@ -72,6 +72,8 @@ pub async fn run(
                 .await?;
         }
     }
+
+    persist::save_new_batch_metadata(&batch_label, start_date, end_date)?;
 
     let result = SuccessResult {
         batch_label: batch_label,
