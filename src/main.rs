@@ -1,18 +1,14 @@
 mod cli;
 mod commands;
 mod config;
+mod date_helpers;
 mod email;
 mod lunch_money;
 mod persist;
 pub mod usd;
 
-use chrono::NaiveDate;
-use chrono_tz::US::Eastern;
-
 use clap::Parser;
-
-use crate::usd::USD;
-use rust_decimal::*;
+use date_helpers::*;
 
 #[tokio::main]
 async fn main() {
@@ -65,29 +61,6 @@ async fn main() {
                 ),
                 Err(e) => println!("Reconciling all batches failed with error: {}", e),
             }
-        }
-        cli::Commands::TestEmail {} => {
-            email::send_email(&"123".to_string(), &USD::new(dec!(50.21)), &config)
-                .await
-                .expect("error email ouch");
-        }
-    }
-}
-
-// Use this for naive dates - I'm based in Eastern currently
-// and it's easier to just use a single reference time zone for all ops
-fn now_date_naive_eastern() -> NaiveDate {
-    chrono::Utc::now().with_timezone(&Eastern).date_naive()
-}
-
-trait DefaultDate {
-    fn or_naive_date_now(&self) -> NaiveDate;
-}
-impl DefaultDate for Option<NaiveDate> {
-    fn or_naive_date_now(&self) -> NaiveDate {
-        match self {
-            Some(e) => *e,
-            None => now_date_naive_eastern(),
         }
     }
 }

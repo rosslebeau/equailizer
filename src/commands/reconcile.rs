@@ -1,8 +1,8 @@
 use crate::config::Config;
 use crate::lunch_money::api::update_transaction::{Split, TransactionUpdate};
 use crate::lunch_money::model::transaction::*;
-use crate::persist;
 use crate::usd::USD;
+use crate::{date_helpers, persist};
 use chrono::NaiveDate;
 use rust_decimal::prelude::*;
 
@@ -15,15 +15,21 @@ struct CreditorBatch {
 pub async fn reconcile_all(config: &Config) -> Result<Vec<String>, Box<dyn std::error::Error>> {
     let unreconciled = persist::unreconciled_metas()?;
     for meta in &unreconciled {
-        reconcile_batch(&meta.name, meta.start_date, meta.end_date, config).await?;
+        reconcile_batch(
+            &meta.name,
+            meta.start_date,
+            date_helpers::now_date_naive_eastern(),
+            config,
+        )
+        .await?;
     }
     Ok(unreconciled.iter().map(|m| m.name.to_owned()).collect())
 }
 
 pub async fn reconcile_batch(
     batch_name: &String,
-    start_date: NaiveDate,
-    end_date: NaiveDate,
+    search_start_date: NaiveDate,
+    search_end_date: NaiveDate,
     config: &Config,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let lm_creditor_client = crate::lunch_money::api::Client {
@@ -31,7 +37,7 @@ pub async fn reconcile_batch(
     };
 
     let creditor_txns = lm_creditor_client
-        .get_transactions(start_date, end_date)
+        .get_transactions(search_start_date, search_end_date)
         .await?;
 
     let creditor_batch = get_creditor_batch_from_txns(creditor_txns, &batch_name, config).await?;
@@ -61,7 +67,7 @@ pub async fn reconcile_batch(
         auth_token: config.debtor.api_key.to_owned(),
     };
     let debtor_txns = lm_debtor_client
-        .get_transactions(start_date, end_date)
+        .get_transactions(search_start_date, search_end_date)
         .await?;
 
     let debtor_repayment_txn =

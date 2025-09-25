@@ -12,19 +12,20 @@ pub struct BatchMetadata {
 
 pub fn all_metas() -> Result<Vec<BatchMetadata>, Box<dyn std::error::Error>> {
     let dir = fs::read_dir("data")?;
-    // for entry in dir {
-    //     // let entry = entry?;
-    //     let file = fs::read_to_string(entry?.path())?;
-    //     let parsed: BatchMetadata = serde_json::from_str(&file)?;
-    // }
-    return dir
-        .map(|e| {
-            let file = fs::read_to_string(e?.path())?;
-            let parsed: BatchMetadata = serde_json::from_str(&file)?;
-            return Ok(parsed);
-        })
-        .collect();
-    // Ok(vec![])
+    let mut parsed_metas: Vec<BatchMetadata> = Vec::new();
+    for entry in dir {
+        let path = match entry?.path().to_str() {
+            Some(s) => s.to_string(),
+            None => continue,
+        };
+        if !path.ends_with("json") {
+            continue;
+        }
+        let file = fs::read_to_string(path)?;
+        let parsed: BatchMetadata = serde_json::from_str(&file)?;
+        parsed_metas.push(parsed);
+    }
+    return Ok(parsed_metas);
 }
 
 pub fn unreconciled_metas() -> Result<Vec<BatchMetadata>, Box<dyn std::error::Error>> {
