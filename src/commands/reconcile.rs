@@ -68,7 +68,7 @@ pub async fn reconcile_batch(
         get_debtor_repayment_txn_from_txns(debtor_txns, &batch_name, config)?;
 
     // create splits on debtor's side to pass through the payees so they can categorize
-    let debtor_splits: Vec<Split> = get_debtor_splits(&creditor_batch.proxy_txns);
+    let debtor_splits: Vec<Split> = create_debtor_splits(&creditor_batch.proxy_txns);
 
     let debtor_txn_update = TransactionUpdate {
         payee: None,
@@ -145,7 +145,7 @@ fn matches_debtor_txn(txn: &Transaction, batch_name: &String, config: &Config) -
                 .is_some_and(|x| x.contains(batch_name)))
 }
 
-fn get_debtor_splits(creditor_proxy_txns: &Vec<Transaction>) -> Vec<Split> {
+fn create_debtor_splits(creditor_proxy_txns: &Vec<Transaction>) -> Vec<Split> {
     creditor_proxy_txns
         .iter()
         .map({
@@ -153,7 +153,7 @@ fn get_debtor_splits(creditor_proxy_txns: &Vec<Transaction>) -> Vec<Split> {
                 amount: t.amount,
                 payee: Some(t.payee.to_owned()),
                 category_id: None,
-                notes: None,
+                notes: Some("Paid via equailizer".to_string()),
                 date: Some(t.date),
             }
         })
