@@ -1,0 +1,19 @@
+{
+	"creditor": {
+		"api_key": "xxx",
+		"proxy_category_id": 11217,
+		"repayment_account_id": 1024,
+		"email_address": "xxx"
+	},
+	"debtor": {
+		"api_key": "xxx",
+		"repayment_account_id": 1337,
+		"venmo_username": "username"
+	},
+	"jmap": {
+		"api_session_endpoint": "xxx",
+		"api_key": "xxx",
+		"sent_mailbox": "xxx",
+		"sending_address": "xxx"
+	}
+}

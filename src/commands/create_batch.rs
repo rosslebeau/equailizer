@@ -1,4 +1,5 @@
 use crate::config::{self, *};
+use crate::email;
 use crate::usd::USD;
 use crate::{
     lunch_money, lunch_money::api::update_transaction, lunch_money::api::update_transaction::Split,
@@ -74,6 +75,8 @@ pub async fn run(
     }
 
     persist::save_new_batch_metadata(&batch_label, start_date, end_date)?;
+
+    email::send_email(&batch_label, &batch_total, config).await?;
 
     let result = SuccessResult {
         batch_label: batch_label,
