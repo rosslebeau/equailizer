@@ -1,5 +1,5 @@
 use crate::{config::*, usd::USD};
-use jmap_client::email::EmailBodyPart;
+use jmap_client::{core::response::MethodResponse::*, email::EmailBodyPart};
 
 pub async fn send_email(
     batch_label: &String,
@@ -11,10 +11,42 @@ pub async fn send_email(
         .connect(&config.jmap.api_session_endpoint)
         .await?;
 
-    let mut email_req = client.build();
-    let email_send_req = email_req.set_email();
+    let mut identity_req = client.build();
+    let identity_get_req = identity_req.get_identity();
+    identity_get_req.account_id(client.default_account_id());
+    identity_req.using.push(jmap_client::URI::Submission);
 
-    let email = email_send_req.create();
+    let identity_response_missing_err: Box<dyn std::error::Error> =
+        Box::from("get identity response missing");
+    let no_matching_identity_err: Box<dyn std::error::Error> =
+        Box::from("no identity matching config's sending address");
+
+    let sending_identity = identity_req
+        .send()
+        .await?
+        .pop_method_response()
+        .ok_or(identity_response_missing_err)?
+        .unwrap_get_identity()?
+        .list()
+        .iter()
+        .filter_map(|x| {
+            if x.email()? == config.jmap.sending_address
+                && let Some(sending_id) = x.id()
+            {
+                Some(sending_id.to_string())
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<String>>()
+        .first()
+        .ok_or(no_matching_identity_err)?
+        .clone();
+
+    let mut email_req = client.build();
+    let email_set_req = email_req.set_email();
+
+    let email = email_set_req.create_with_id("m0");
     email.from([config.jmap.sending_address.clone()]);
     email.to([config.creditor.email_address.clone()]);
     email.subject("Quail alert! Batch ready from equailizer");
@@ -50,7 +82,23 @@ pub async fn send_email(
     );
     email.html_body(html_body_id);
 
-    email_req.send().await?;
+    let email_response = match email_req.send().await?.pop_method_response() {
+        Some(res) => res.unwrap_method_response(),
+        None => {
+            return Err("JMAP create email response did not contain any methodResponses".into());
+        }
+    };
+
+    let no_id_err: Box<dyn std::error::Error> =
+        Box::from("didn't find email submission id in response");
+    let email_id = match email_response {
+        SetEmail(mut es) => es.created("m0")?.id().ok_or(no_id_err)?.to_string(),
+        _ => return Err("JMAP create email response was not of type SetEmail".into()),
+    };
+
+    client
+        .email_submission_create(email_id, sending_identity)
+        .await?;
 
     Ok(())
 }

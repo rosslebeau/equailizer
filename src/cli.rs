@@ -51,4 +51,5 @@ pub enum Commands {
         end_date: Option<NaiveDate>,
     },
     ReconcileAll {},
+    TestEmail {},
 }

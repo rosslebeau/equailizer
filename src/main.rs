@@ -8,7 +8,10 @@ mod persist;
 pub mod usd;
 
 use clap::Parser;
+
+use crate::usd::USD;
 use date_helpers::*;
+use rust_decimal::*;
 
 #[tokio::main]
 async fn main() {
@@ -61,6 +64,11 @@ async fn main() {
                 ),
                 Err(e) => println!("Reconciling all batches failed with error: {}", e),
             }
+        }
+        cli::Commands::TestEmail {} => {
+            email::send_email(&"456".to_string(), &USD::new(dec!(50.21)), &config)
+                .await
+                .expect("error email ouch");
         }
     }
 }
