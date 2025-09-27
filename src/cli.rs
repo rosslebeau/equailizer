@@ -1,5 +1,6 @@
+use crate::date_helpers;
 use chrono::NaiveDate;
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 
 #[derive(Parser, Debug)]
 #[command(name = "equailizer")]
@@ -9,16 +10,20 @@ pub struct Equailizer {
     pub command: Commands,
 }
 
+#[derive(Args, Debug)]
+#[group(required = true, multiple = false)]
+pub struct StartArgs {
+    #[arg(long = "start-date", short = 's', value_name = "yyyy-mm-dd")]
+    pub start_date: Option<NaiveDate>,
+    #[arg(long = "start-days-ago")]
+    pub start_days_ago: Option<u16>,
+}
+
 #[derive(Debug, Subcommand)]
 pub enum Commands {
     CreateBatch {
-        #[arg(
-            required = true,
-            long = "start-date",
-            short = 's',
-            value_name = "yyyy-mm-dd"
-        )]
-        start_date: NaiveDate,
+        #[command(flatten)]
+        start: StartArgs,
         #[arg(
             required = false,
             long = "end-date",
@@ -26,6 +31,8 @@ pub enum Commands {
             value_name = "yyyy-mm-dd"
         )]
         end_date: Option<NaiveDate>,
+        #[arg(required = true, long = "profile", short = 'p')]
+        profile: String,
     },
     Reconcile {
         #[arg(
@@ -35,13 +42,8 @@ pub enum Commands {
             value_name = "batch name"
         )]
         batch_name: String,
-        #[arg(
-            required = true,
-            long = "start-date",
-            short = 's',
-            value_name = "yyyy-mm-dd"
-        )]
-        start_date: NaiveDate,
+        #[command(flatten)]
+        start: StartArgs,
         #[arg(
             required = false,
             long = "end-date",
@@ -49,7 +51,24 @@ pub enum Commands {
             value_name = "yyyy-mm-dd"
         )]
         end_date: Option<NaiveDate>,
+        #[arg(required = true, long = "profile", short = 'p')]
+        profile: String,
     },
-    ReconcileAll {},
-    TestEmail {},
+    ReconcileAll {
+        #[arg(required = true, long = "profile", short = 'p')]
+        profile: String,
+    },
+}
+
+pub fn start_date_from_args(args: StartArgs) -> NaiveDate {
+    match (args.start_date, args.start_days_ago) {
+        (Some(date), None) => date,
+        (None, Some(days_ago)) => {
+            date_helpers::now_date_naive_eastern() - chrono::Days::new(days_ago.into())
+        }
+        (Some(date), Some(_)) => date,
+        (None, None) => {
+            unreachable!("clap lib error: either 'start date' or 'start days ago' must be provided")
+        }
+    }
 }

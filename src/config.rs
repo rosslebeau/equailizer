@@ -39,8 +39,9 @@ pub struct JMAP {
     pub sending_address: String,
 }
 
-pub fn read_config() -> Result<Config, Box<dyn std::error::Error>> {
-    let file = fs::read_to_string("eq-config.json").expect("eq-config.json should be present");
+pub fn read_config(profile: &String) -> Result<Config, Box<dyn std::error::Error>> {
+    let file = fs::read_to_string(format!("profiles/{}/config.json", profile))
+        .expect("config.json should be present");
     let parsed: Config = serde_json::from_str(&file)?;
     return Ok(parsed);
 }

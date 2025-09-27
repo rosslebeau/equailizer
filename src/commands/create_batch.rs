@@ -19,6 +19,7 @@ pub async fn run(
     start_date: NaiveDate,
     end_date: NaiveDate,
     config: &Config,
+    profile: &String,
 ) -> Result<SuccessResult, Box<dyn std::error::Error>> {
     if start_date.cmp(&end_date) == std::cmp::Ordering::Greater {
         return Err("start date cannot be after end date".into());
@@ -35,9 +36,17 @@ pub async fn run(
         .get_transactions(start_date, end_date)
         .await?;
 
+    let mut found_any_txns = false;
+    let mut earliest_txn_date = end_date;
     for txn in txns {
         let tag_names: Vec<String> = txn.tags.iter().map(|t| t.name.to_owned()).collect();
         if tag_names.contains(&config::TAG_BATCH_SPLIT.into()) {
+            found_any_txns = true;
+
+            if txn.date < earliest_txn_date {
+                earliest_txn_date = txn.date;
+            }
+
             let splits = create_random_even_splits(&txn, &batch_label, config);
 
             batch_total = batch_total + splits.debtor_split.amount;
@@ -58,6 +67,12 @@ pub async fn run(
                 )
                 .await?;
         } else if tag_names.contains(&config::TAG_BATCH_ADD.into()) {
+            found_any_txns = true;
+
+            if txn.date < earliest_txn_date {
+                earliest_txn_date = txn.date;
+            }
+
             batch_total = batch_total + txn.amount;
 
             let txn_update = update_transaction::TransactionUpdate {
@@ -74,7 +89,11 @@ pub async fn run(
         }
     }
 
-    persist::save_new_batch_metadata(&batch_label, start_date, end_date)?;
+    if !found_any_txns {
+        return Err("no transactions with batching tag found".into());
+    }
+
+    persist::save_new_batch_metadata(&batch_label, earliest_txn_date, end_date, profile)?;
 
     email::send_email(&batch_label, &batch_total, config).await?;
 

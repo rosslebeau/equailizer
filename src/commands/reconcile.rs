@@ -12,14 +12,18 @@ struct CreditorBatch {
 }
 
 // On success, returns a list of reconciled batch names
-pub async fn reconcile_all(config: &Config) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-    let unreconciled = persist::unreconciled_metas()?;
+pub async fn reconcile_all(
+    config: &Config,
+    profile: &String,
+) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    let unreconciled = persist::unreconciled_metas(profile)?;
     for meta in &unreconciled {
         reconcile_batch(
             &meta.name,
             meta.start_date,
             date_helpers::now_date_naive_eastern(),
             config,
+            profile,
         )
         .await?;
     }
@@ -31,6 +35,7 @@ pub async fn reconcile_batch(
     search_start_date: NaiveDate,
     search_end_date: NaiveDate,
     config: &Config,
+    profile: &String,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let lm_creditor_client = crate::lunch_money::api::Client {
         auth_token: config.creditor.api_key.to_owned(),
@@ -88,7 +93,7 @@ pub async fn reconcile_batch(
         .update_txn_and_split(debtor_repayment_txn.id, &debtor_txn_update, &debtor_splits)
         .await?;
 
-    persist::set_reconciled(&batch_name, true)?;
+    persist::set_reconciled(&batch_name, true, profile)?;
 
     return Ok(());
 }
