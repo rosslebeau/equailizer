@@ -22,10 +22,10 @@ I wrote this program for myself and my wife, and it is tailored to our use case.
 
 ## FAQ
 
-### Why does `equailizer` only support JMAP? Isn't IMAP more popular?
+#### Why does `equailizer` only support JMAP? Isn't IMAP more popular?
 
 I use Fastmail, and I am hopeful that JMAP (especially the calendar portion) can supersede IMAP/CalDAV one day.
 
-### Why is it called "`equailizer`"?
+#### Why is it called "`equailizer`"?
 
 It is a portmanteau of equalizer and quail.
