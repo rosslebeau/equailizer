@@ -2,3 +2,4 @@
 /target
 eq-config.json
 /profiles/*
+eq.log*

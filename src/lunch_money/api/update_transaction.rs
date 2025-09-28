@@ -1,8 +1,9 @@
 use super::Client;
-use crate::lunch_money::model::transaction::Id as TransactionId;
 use crate::lunch_money::model::transaction::*;
 use crate::usd::USD;
+use crate::{config, lunch_money::model::transaction::Id as TransactionId};
 use chrono::NaiveDate;
+use display_json::DebugAsJson;
 use serde::{Deserialize, Serialize};
 
 // This model is only used to perform this split action
@@ -93,7 +94,7 @@ impl Client {
         txn_update: Option<&TransactionUpdate>,
         splits: Option<&Vec<Split>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        #[derive(Debug, Serialize)]
+        #[derive(DebugAsJson, Serialize)]
         struct RequestBodySource<'a> {
             #[serde(skip_serializing_if = "Option::is_none")]
             transaction: Option<&'a TransactionUpdate>,
@@ -109,6 +110,12 @@ impl Client {
                 split: splits,
             },
         };
+
+        tracing::debug!(txn_id, ?txn_update_body, "updating transaction");
+
+        if config::is_dry_run() {
+            return Ok(());
+        }
 
         let client = reqwest::Client::new();
         let auth_header = format!("Bearer {}", self.auth_token);

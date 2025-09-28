@@ -1,16 +1,30 @@
+use crate::config;
 use chrono::NaiveDate;
+use display_json::DebugAsJson;
 use serde::{Deserialize, Serialize};
-use std::{
-    fs,
-    path::{Path, PathBuf},
-};
+use std::{fs, path::PathBuf};
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(DebugAsJson, Deserialize, Serialize)]
 pub struct BatchMetadata {
     pub name: String,
     pub start_date: NaiveDate,
     pub end_date: NaiveDate,
     pub reconciled: bool,
+}
+
+pub fn base_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let mut base_path = std::env::current_exe()?
+        .parent()
+        .ok_or(Box::<dyn std::error::Error>::from(
+            "could not open path of executable",
+        ))?
+        .to_path_buf();
+
+    if cfg!(debug_assertions) {
+        base_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    }
+
+    return Ok(base_path);
 }
 
 pub fn all_metas(profile: &String) -> Result<Vec<BatchMetadata>, Box<dyn std::error::Error>> {
@@ -65,6 +79,13 @@ pub fn save_new_batch_metadata(
         end_date: end_date,
         reconciled: false,
     };
+
+    tracing::debug!(?new_meta, "saving new batch metadata");
+
+    if config::is_dry_run() {
+        return Ok(());
+    }
+
     let json = serde_json::to_string_pretty(&new_meta)?;
     fs::write(filename_for(batch_name, profile)?, json)?;
     Ok(())
@@ -77,6 +98,13 @@ pub fn set_reconciled(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut metadata = metadata_for_batch(batch_name, profile)?;
     metadata.reconciled = reconciled;
+
+    tracing::debug!(?metadata, "setting reconciled = true in batch metadata");
+
+    if config::is_dry_run() {
+        return Ok(());
+    }
+
     let json = serde_json::to_string_pretty(&metadata)?;
     fs::write(filename_for(batch_name, profile)?, json)?;
     Ok(())
@@ -92,17 +120,18 @@ fn filename_for(
 }
 
 fn get_or_create_data_dir(profile: &String) -> Result<PathBuf, Box<dyn std::error::Error>> {
-    let path_str = format!("profiles/{}/data", profile);
-    let path = Path::new(&path_str);
-    if !path.is_dir() {
-        if path.exists() {
+    let mut data_path = base_path()?;
+    data_path.push(format!("profiles/{}/data", profile));
+
+    if !data_path.is_dir() {
+        if data_path.exists() {
             return Err(
                 "cannot create or open data directory - non-directory file exists at this path"
                     .into(),
             );
         } else {
-            fs::create_dir_all(path)?;
+            fs::create_dir_all(data_path.as_path())?;
         }
     }
-    return Ok(path.to_path_buf());
+    return Ok(data_path);
 }

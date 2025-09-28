@@ -2,11 +2,17 @@ use serde::Deserialize;
 use std::fs;
 use uuid::Uuid;
 
+use crate::persist;
+
 pub const TAG_BATCH_SPLIT: &str = "eq-to-split";
 pub const TAG_BATCH_ADD: &str = "eq-to-batch";
 
 pub fn eq_batch_name(from_uuid: Uuid) -> String {
     format!("eq{from_uuid}")
+}
+
+pub fn is_dry_run() -> bool {
+    std::env::var("DRY_RUN").expect("environment var failed") == "1"
 }
 
 #[derive(Debug, Deserialize)]
@@ -40,8 +46,10 @@ pub struct JMAP {
 }
 
 pub fn read_config(profile: &String) -> Result<Config, Box<dyn std::error::Error>> {
-    let file = fs::read_to_string(format!("profiles/{}/config.json", profile))
-        .expect("config.json should be present");
+    let mut config_path = persist::base_path()?;
+    config_path.push(format!("profiles/{}/config.json", profile));
+
+    let file = fs::read_to_string(config_path).expect("config.json should be present");
     let parsed: Config = serde_json::from_str(&file)?;
     return Ok(parsed);
 }

@@ -3,6 +3,7 @@ mod commands;
 mod config;
 mod date_helpers;
 mod email;
+mod log;
 mod lunch_money;
 mod persist;
 pub mod usd;
@@ -16,6 +17,12 @@ use date_helpers::*;
 
 #[tokio::main]
 async fn main() {
+    let log_guard = log::init_tracing();
+
+    if config::is_dry_run() {
+        tracing::info!("dry run beginning");
+    }
+
     let args = cli::Equailizer::parse();
 
     match args.command {
@@ -25,7 +32,7 @@ async fn main() {
             profile,
         } => match handle_create_batch(start, end_date, profile).await {
             Ok(output) => println!("{}", output),
-            Err(e) => println!("Creating batch failed with error: {}", e),
+            Err(e) => tracing::info!(e, "creating batch failed"),
         },
         cli::Commands::Reconcile {
             batch_name,
@@ -41,6 +48,12 @@ async fn main() {
             Err(e) => println!("Reconciling batch failed with error: {}", e),
         },
     }
+
+    if config::is_dry_run() {
+        tracing::info!("dry run ended");
+    }
+
+    drop(log_guard);
 }
 
 async fn handle_create_batch(

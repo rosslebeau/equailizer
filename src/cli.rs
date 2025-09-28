@@ -15,7 +15,7 @@ pub struct Equailizer {
 pub struct StartArgs {
     #[arg(long = "start-date", short = 's', value_name = "yyyy-mm-dd")]
     pub start_date: Option<NaiveDate>,
-    #[arg(long = "start-days-ago")]
+    #[arg(long = "start-days-ago", short = 'a')]
     pub start_days_ago: Option<u16>,
 }
 

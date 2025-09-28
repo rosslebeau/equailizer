@@ -1,4 +1,7 @@
-use crate::{config::*, usd::USD};
+use crate::{
+    config::{self, *},
+    usd::USD,
+};
 use jmap_client::{core::response::MethodResponse::*, email::EmailBodyPart};
 
 pub async fn send_email(
@@ -6,6 +9,16 @@ pub async fn send_email(
     amount: &USD,
     config: &Config,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    tracing::debug!(
+        config.jmap.sending_address,
+        config.creditor.email_address,
+        "sending email"
+    );
+
+    if config::is_dry_run() {
+        return Ok(());
+    }
+
     let client = jmap_client::client::Client::new()
         .credentials(config.jmap.api_key.clone())
         .connect(&config.jmap.api_session_endpoint)
@@ -99,6 +112,12 @@ pub async fn send_email(
     client
         .email_submission_create(email_id, sending_identity)
         .await?;
+
+    tracing::debug!(
+        config.jmap.sending_address,
+        config.creditor.email_address,
+        "email sent"
+    );
 
     Ok(())
 }

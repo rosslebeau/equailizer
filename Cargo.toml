@@ -15,3 +15,7 @@ edition = "2024"
     uuid = { version = "1.18", features = ["v4"] }
     rand = "0.9"
     jmap-client = "0.3"
+    tracing = "0.1"
+    tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "time"] }
+    tracing-appender = "0.2"   # for rolling file + non-blocking writer
+    display_json = "0.2"
