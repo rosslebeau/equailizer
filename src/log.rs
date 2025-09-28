@@ -1,5 +1,5 @@
 use tracing_appender::non_blocking::WorkerGuard;
-use tracing_subscriber::filter::{EnvFilter, LevelFilter, Targets};
+use tracing_subscriber::filter::{LevelFilter, Targets};
 use tracing_subscriber::{fmt, layer::*, util::SubscriberInitExt};
 
 pub fn init_tracing() -> Result<WorkerGuard, Box<dyn std::error::Error>> {

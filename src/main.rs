@@ -30,7 +30,8 @@ async fn main() {
             start,
             end_date,
             profile,
-        } => match handle_create_batch(start, end_date, profile).await {
+            dry_run,
+        } => match handle_create_batch(start, end_date, profile, dry_run).await {
             Ok(output) => println!("{}", output),
             Err(e) => tracing::info!(e, "creating batch failed"),
         },
@@ -39,7 +40,8 @@ async fn main() {
             start,
             end_date,
             profile,
-        } => match handle_reconcile(batch_name, start, end_date, profile).await {
+            dry_run,
+        } => match handle_reconcile(batch_name, start, end_date, profile, dry_run).await {
             Ok(output) => println!("{}", output),
             Err(e) => println!("Reconciling batch failed with error: {}", e),
         },
@@ -60,7 +62,9 @@ async fn handle_create_batch(
     start: StartArgs,
     end_date: Option<NaiveDate>,
     profile: String,
+    dry_run: bool,
 ) -> Result<String, Box<dyn std::error::Error>> {
+    config::set_dry_run(dry_run);
     let config = config::read_config(&profile)?;
     let start_date = cli::start_date_from_args(start);
     let end_date = end_date.or_naive_date_now();
@@ -76,7 +80,9 @@ async fn handle_reconcile(
     start: StartArgs,
     end_date: Option<NaiveDate>,
     profile: String,
+    dry_run: bool,
 ) -> Result<String, Box<dyn std::error::Error>> {
+    config::set_dry_run(dry_run);
     let config = config::read_config(&profile)?;
     let start_date = cli::start_date_from_args(start);
     let end_date = end_date.or_naive_date_now();

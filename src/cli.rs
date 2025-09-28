@@ -1,6 +1,6 @@
 use crate::date_helpers;
 use chrono::NaiveDate;
-use clap::{Args, Parser, Subcommand};
+use clap::{ArgAction, Args, Parser, Subcommand};
 
 #[derive(Parser, Debug)]
 #[command(name = "equailizer")]
@@ -33,6 +33,8 @@ pub enum Commands {
         end_date: Option<NaiveDate>,
         #[arg(required = true, long = "profile", short = 'p')]
         profile: String,
+        #[arg(short, long, action = ArgAction::SetTrue)]
+        dry_run: bool,
     },
     Reconcile {
         #[arg(
@@ -53,6 +55,8 @@ pub enum Commands {
         end_date: Option<NaiveDate>,
         #[arg(required = true, long = "profile", short = 'p')]
         profile: String,
+        #[arg(short, long, action = ArgAction::SetTrue)]
+        dry_run: bool,
     },
     ReconcileAll {
         #[arg(required = true, long = "profile", short = 'p')]

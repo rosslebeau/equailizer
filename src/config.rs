@@ -1,5 +1,6 @@
 use serde::Deserialize;
 use std::fs;
+use std::sync::OnceLock;
 use uuid::Uuid;
 
 use crate::persist;
@@ -7,12 +8,22 @@ use crate::persist;
 pub const TAG_BATCH_SPLIT: &str = "eq-to-split";
 pub const TAG_BATCH_ADD: &str = "eq-to-batch";
 
+pub static DRY_RUN: OnceLock<bool> = OnceLock::new();
+
 pub fn eq_batch_name(from_uuid: Uuid) -> String {
     format!("eq{from_uuid}")
 }
 
 pub fn is_dry_run() -> bool {
-    std::env::var("DRY_RUN").expect("environment var failed") == "1"
+    DRY_RUN.get().is_some_and(|x| *x)
+}
+
+// Crashes on error. This is an unexpected and unrecoverable error - stop execution to avoid unexpected downstream effects
+pub fn set_dry_run(dry_run: bool) {
+    DRY_RUN
+        .set(dry_run)
+        .expect("coudln't set DRY_RUN config - did you try to set it twice?");
+    tracing::info!("DRY_RUN set to {}", dry_run);
 }
 
 #[derive(Debug, Deserialize)]

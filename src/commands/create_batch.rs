@@ -109,7 +109,7 @@ async fn split_txn(
     batch_label: &String,
     client: &Client,
     config: &Config,
-) -> Result<(USD), Box<dyn std::error::Error>> {
+) -> Result<USD, Box<dyn std::error::Error>> {
     tracing::debug!(txn.id, "splitting transaction");
 
     let splits = create_random_even_splits(&txn, &batch_label, config);
