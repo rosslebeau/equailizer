@@ -23,7 +23,11 @@ pub fn set_dry_run(dry_run: bool) {
     DRY_RUN
         .set(dry_run)
         .expect("coudln't set DRY_RUN config - did you try to set it twice?");
-    tracing::info!("DRY_RUN set to {}", dry_run);
+    if dry_run {
+        tracing::info!("DRY_RUN set to {}", dry_run);
+    } else {
+        tracing::debug!("DRY_RUN set to {}", dry_run);
+    }
 }
 
 #[derive(Debug, Deserialize)]

@@ -45,10 +45,12 @@ async fn main() {
             Ok(output) => println!("{}", output),
             Err(e) => println!("Reconciling batch failed with error: {}", e),
         },
-        cli::Commands::ReconcileAll { profile } => match handle_reconcile_all(profile).await {
-            Ok(output) => println!("{}", output),
-            Err(e) => println!("Reconciling batch failed with error: {}", e),
-        },
+        cli::Commands::ReconcileAll { profile, dry_run } => {
+            match handle_reconcile_all(profile, dry_run).await {
+                Ok(output) => println!("{}", output),
+                Err(e) => println!("Reconciling batch failed with error: {}", e),
+            }
+        }
     }
 
     if config::is_dry_run() {
@@ -91,7 +93,11 @@ async fn handle_reconcile(
     return Ok(format!("Successfully reconciled batch: {}", batch_name));
 }
 
-async fn handle_reconcile_all(profile: String) -> Result<String, Box<dyn std::error::Error>> {
+async fn handle_reconcile_all(
+    profile: String,
+    dry_run: bool,
+) -> Result<String, Box<dyn std::error::Error>> {
+    config::set_dry_run(dry_run);
     let config = config::read_config(&profile)?;
     let reconciled_batch_names = commands::reconcile::reconcile_all(&config, &profile).await?;
     return Ok(format!(

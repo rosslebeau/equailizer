@@ -61,6 +61,8 @@ pub enum Commands {
     ReconcileAll {
         #[arg(required = true, long = "profile", short = 'p')]
         profile: String,
+        #[arg(short, long, action = ArgAction::SetTrue)]
+        dry_run: bool,
     },
 }
 
