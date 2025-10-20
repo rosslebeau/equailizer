@@ -32,8 +32,8 @@ async fn main() {
             profile,
             dry_run,
         } => match handle_create_batch(start, end_date, profile, dry_run).await {
-            Ok(output) => println!("{}", output),
-            Err(e) => tracing::info!(e, "creating batch failed"),
+            Ok(output) => tracing::info!(output),
+            Err(e) => tracing::error!(e, "creating batch failed"),
         },
         cli::Commands::Reconcile {
             batch_name,
@@ -42,13 +42,13 @@ async fn main() {
             profile,
             dry_run,
         } => match handle_reconcile(batch_name, start, end_date, profile, dry_run).await {
-            Ok(output) => println!("{}", output),
-            Err(e) => println!("Reconciling batch failed with error: {}", e),
+            Ok(output) => tracing::info!(output),
+            Err(e) => tracing::error!(e, "reconciling batch failed"),
         },
         cli::Commands::ReconcileAll { profile, dry_run } => {
             match handle_reconcile_all(profile, dry_run).await {
-                Ok(output) => println!("{}", output),
-                Err(e) => println!("Reconciling batch failed with error: {}", e),
+                Ok(output) => tracing::info!(output),
+                Err(e) => tracing::error!(e, "reconciling failed"),
             }
         }
     }
