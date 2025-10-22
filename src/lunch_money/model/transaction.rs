@@ -37,4 +37,7 @@ pub enum TransactionStatus {
 
     #[serde(rename = "pending")]
     Pending,
+
+    #[serde(rename = "delete_pending")]
+    DeletePending,
 }
