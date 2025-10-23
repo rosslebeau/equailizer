@@ -37,17 +37,15 @@ async fn main() {
         },
         cli::Commands::Reconcile {
             batch_name,
-            start,
-            end_date,
             profile,
             dry_run,
-        } => match handle_reconcile(batch_name, start, end_date, profile, dry_run).await {
+        } => match handle_reconcile(batch_name, profile, dry_run).await {
             Ok(output) => tracing::info!(output),
             Err(e) => tracing::error!(e, "reconciling batch failed"),
         },
         cli::Commands::ReconcileAll { profile, dry_run } => {
             match handle_reconcile_all(profile, dry_run).await {
-                Ok(output) => tracing::info!(output),
+                Ok(()) => tracing::info!("Successfully reconciled all outstanding batches"),
                 Err(e) => tracing::error!(e, "reconciling failed"),
             }
         }
@@ -79,29 +77,21 @@ async fn handle_create_batch(
 
 async fn handle_reconcile(
     batch_name: String,
-    start: StartArgs,
-    end_date: Option<NaiveDate>,
     profile: String,
     dry_run: bool,
 ) -> Result<String, Box<dyn std::error::Error>> {
     config::set_dry_run(dry_run);
     let config = config::read_config(&profile)?;
-    let start_date = cli::start_date_from_args(start);
-    let end_date = end_date.or_naive_date_now();
-    commands::reconcile::reconcile_batch(&batch_name, start_date, end_date, &config, &profile)
-        .await?;
+    commands::reconcile::reconcile_batch_name(&batch_name, &config, &profile).await?;
     return Ok(format!("Successfully reconciled batch: {}", batch_name));
 }
 
 async fn handle_reconcile_all(
     profile: String,
     dry_run: bool,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error>> {
     config::set_dry_run(dry_run);
     let config = config::read_config(&profile)?;
-    let reconciled_batch_names = commands::reconcile::reconcile_all(&config, &profile).await?;
-    return Ok(format!(
-        "Successfully reconciled all outstanding batches:\n{}",
-        reconciled_batch_names.join("\n")
-    ));
+    commands::reconcile::reconcile_all(&config, &profile).await?;
+    return Ok(());
 }

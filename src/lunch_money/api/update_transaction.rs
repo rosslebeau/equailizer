@@ -42,23 +42,8 @@ pub struct TransactionUpdate {
     pub status: Option<TransactionStatus>,
 }
 
-#[derive(Debug, Deserialize)]
-struct UpdateTransactionSuccess {
-    updated: bool,
-    #[allow(dead_code)]
-    split: Option<Vec<TransactionId>>,
-}
-
-#[derive(Debug, Deserialize)]
-struct UpdateTransactionError {
-    error: Vec<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum UpdateTransactionResponse {
-    Success(UpdateTransactionSuccess),
-    Error(UpdateTransactionError),
+pub struct Response {
+    pub splits: Option<Vec<TransactionId>>,
 }
 
 impl Client {
@@ -66,7 +51,7 @@ impl Client {
         &self,
         txn_id: TransactionId,
         txn_update: &TransactionUpdate,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<Response, Box<dyn std::error::Error>> {
         self.update(txn_id, Some(txn_update), None).await
     }
 
@@ -75,7 +60,7 @@ impl Client {
         &self,
         txn_id: TransactionId,
         splits: &Vec<Split>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<Response, Box<dyn std::error::Error>> {
         self.update(txn_id, None, Some(splits)).await
     }
 
@@ -84,7 +69,7 @@ impl Client {
         txn_id: TransactionId,
         txn_update: &TransactionUpdate,
         splits: &Vec<Split>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<Response, Box<dyn std::error::Error>> {
         self.update(txn_id, Some(txn_update), Some(splits)).await
     }
 
@@ -93,7 +78,26 @@ impl Client {
         txn_id: TransactionId,
         txn_update: Option<&TransactionUpdate>,
         splits: Option<&Vec<Split>>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<Response, Box<dyn std::error::Error>> {
+        #[derive(Debug, Deserialize)]
+        struct SuccessResponse {
+            updated: bool,
+            #[allow(dead_code)]
+            splits: Option<Vec<TransactionId>>,
+        }
+
+        #[derive(Debug, Deserialize)]
+        struct ErrorResponse {
+            error: Vec<String>,
+        }
+
+        #[derive(Debug, Deserialize)]
+        #[serde(untagged)]
+        enum Response {
+            Success(SuccessResponse),
+            Error(ErrorResponse),
+        }
+
         #[derive(DebugAsJson, Serialize)]
         struct RequestBodySource<'a> {
             #[serde(skip_serializing_if = "Option::is_none")]
@@ -114,7 +118,9 @@ impl Client {
         tracing::debug!(txn_id, ?txn_update_body, "updating transaction");
 
         if config::is_dry_run() {
-            return Ok(());
+            return Ok(self::Response {
+                splits: Some(vec![0, 1]),
+            });
         }
 
         let client = reqwest::Client::new();
@@ -128,17 +134,17 @@ impl Client {
             .await?;
 
         let http_code = response.status();
-        let result: UpdateTransactionResponse = response.json().await?;
+        let result: Response = response.json().await?;
 
         match result {
-            UpdateTransactionResponse::Success(s) => {
+            Response::Success(s) => {
                 if s.updated {
-                    return Ok(());
+                    return Ok(self::Response { splits: s.splits });
                 } else {
                     return Err("http 200 but transaction not updated".into());
                 }
             }
-            UpdateTransactionResponse::Error(e) => {
+            Response::Error(e) => {
                 return Err(e
                     .error
                     .first()

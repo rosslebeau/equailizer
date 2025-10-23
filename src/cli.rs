@@ -44,15 +44,6 @@ pub enum Commands {
             value_name = "batch name"
         )]
         batch_name: String,
-        #[command(flatten)]
-        start: StartArgs,
-        #[arg(
-            required = false,
-            long = "end-date",
-            short = 'e',
-            value_name = "yyyy-mm-dd"
-        )]
-        end_date: Option<NaiveDate>,
         #[arg(required = true, long = "profile", short = 'p')]
         profile: String,
         #[arg(short, long, action = ArgAction::SetTrue)]

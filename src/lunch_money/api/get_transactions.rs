@@ -1,3 +1,5 @@
+use crate::lunch_money::model::transaction;
+
 use super::super::model::transaction::Transaction;
 use super::Client;
 
@@ -10,9 +12,26 @@ struct TransactionsResponse {
     transactions: Vec<Transaction>,
 }
 
+pub type GetTransactionResult = Result<Transaction, Box<dyn std::error::Error>>;
 pub type GetTransactionsResult = Result<Vec<Transaction>, Box<dyn std::error::Error>>;
 
 impl Client {
+    pub async fn get_transaction(&self, id: transaction::Id) -> GetTransactionResult {
+        let auth_header = format!("Bearer {}", self.auth_token);
+
+        let url = format!("https://dev.lunchmoney.app/v1/transactions/{}", id);
+        let client = reqwest::Client::new();
+        let response: Transaction = client
+            .get(url)
+            .header("Authorization", auth_header)
+            .send()
+            .await?
+            .json()
+            .await?;
+
+        return Ok(response);
+    }
+
     /*  This does not do pagination. The default limit for transactions is 1000,
         which is more than enough to run once a week, which is the goal here.
         If there are more than 1000 transactions from start_date to end_date, this program will not work correctly.

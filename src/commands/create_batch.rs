@@ -1,9 +1,12 @@
 use crate::config::{self, *};
 use crate::email;
+use crate::persist::Batch;
 use crate::usd::USD;
 use crate::{
     lunch_money, lunch_money::api::Client, lunch_money::api::update_transaction,
-    lunch_money::api::update_transaction::Split, lunch_money::model::transaction::*, persist,
+    lunch_money::api::update_transaction::Split,
+    lunch_money::model::transaction::Id as TransactionId, lunch_money::model::transaction::*,
+    persist,
 };
 use chrono::NaiveDate;
 use rand::random_bool;
@@ -44,6 +47,7 @@ pub async fn run(
 
     let mut found_valid_txns = false;
     let mut earliest_txn_date = end_date;
+    let mut batch_txn_ids: Vec<TransactionId> = Vec::new();
     for txn in txns {
         let tag_names: Vec<String> = txn.tags.iter().map(|t| t.name.to_owned()).collect();
         if tag_names.contains(&config::TAG_BATCH_SPLIT.into()) {
@@ -62,7 +66,9 @@ pub async fn run(
                     earliest_txn_date = txn.date;
                 }
 
-                let split_amt = split_txn(&txn, &batch_label, &lm_creditor_client, config).await?;
+                let (split_id, split_amt) =
+                    split_txn(&txn, &batch_label, &lm_creditor_client, config).await?;
+                batch_txn_ids.push(split_id);
                 batch_total = batch_total + split_amt;
             }
         } else if tag_names.contains(&config::TAG_BATCH_ADD.into()) {
@@ -84,7 +90,8 @@ pub async fn run(
 
                 batch_total = batch_total + txn.amount;
 
-                add_txn_to_batch(&txn, &batch_label, &lm_creditor_client, config).await?;
+                add_txn_to_batch(&txn, &lm_creditor_client, config).await?;
+                batch_txn_ids.push(txn.id);
             }
         }
     }
@@ -93,7 +100,17 @@ pub async fn run(
         return Err("no valid transactions with batching tag found".into());
     }
 
-    persist::save_new_batch_metadata(&batch_label, earliest_txn_date, end_date, profile)?;
+    persist::save_batch(
+        Batch {
+            name: batch_label.to_owned(),
+            start_date: earliest_txn_date,
+            end_date: end_date,
+            amount: batch_total,
+            transaction_ids: batch_txn_ids,
+            reconciliation: None,
+        },
+        profile,
+    )?;
 
     email::send_email(&batch_label, &batch_total, config).await?;
 
@@ -104,16 +121,17 @@ pub async fn run(
     return Ok(result);
 }
 
+// Returns the debtor's split id and amount, because that's all we care about for now
 async fn split_txn(
     txn: &Transaction,
     batch_label: &String,
     client: &Client,
     config: &Config,
-) -> Result<USD, Box<dyn std::error::Error>> {
+) -> Result<(TransactionId, USD), Box<dyn std::error::Error>> {
     tracing::debug!(txn.id, "splitting transaction");
 
     let splits = create_random_even_splits(&txn, &batch_label, config);
-    let split_amt = splits.debtor_split.amount;
+    let debtor_split_amt = splits.debtor_split.amount;
 
     let txn_update = update_transaction::TransactionUpdate {
         payee: None,
@@ -123,15 +141,20 @@ async fn split_txn(
         status: Some(TransactionStatus::Cleared),
     };
 
-    client
+    let debtor_split_id = client
         .update_txn_and_split(
             txn.id,
             &txn_update,
             &vec![splits.creditor_split, splits.debtor_split],
         )
-        .await?;
+        .await?
+        .splits
+        .ok_or("No split ids in split txn response")?
+        .get(1)
+        .expect("fewer than 2 split ids in split txn response")
+        .to_owned();
 
-    return Ok(split_amt);
+    return Ok((debtor_split_id, debtor_split_amt));
 }
 
 async fn remove_tag(
@@ -153,14 +176,13 @@ async fn remove_tag(
 
 async fn add_txn_to_batch(
     txn: &Transaction,
-    batch_label: &String,
     client: &Client,
     config: &Config,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let txn_update = update_transaction::TransactionUpdate {
         payee: None,
         category_id: Some(config.creditor.proxy_category_id),
-        notes: Some(batch_label.to_owned()),
+        notes: None,
         tags: Some(tags_by_removing_tag(&txn, config::TAG_BATCH_ADD.into())),
         status: Some(TransactionStatus::Cleared),
     };

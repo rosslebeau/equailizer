@@ -1,15 +1,27 @@
-use crate::config;
+use crate::{
+    config,
+    lunch_money::model::transaction::{self},
+    usd::USD,
+};
 use chrono::NaiveDate;
 use display_json::DebugAsJson;
 use serde::{Deserialize, Serialize};
 use std::{fs, path::PathBuf};
 
 #[derive(DebugAsJson, Deserialize, Serialize)]
-pub struct BatchMetadata {
+pub struct Batch {
     pub name: String,
     pub start_date: NaiveDate,
     pub end_date: NaiveDate,
-    pub reconciled: bool,
+    pub amount: USD,
+    pub transaction_ids: Vec<transaction::Id>,
+    pub reconciliation: Option<Reconciliation>,
+}
+
+#[derive(DebugAsJson, Deserialize, Serialize)]
+pub struct Reconciliation {
+    pub creditor_repayment_transaction_id: transaction::Id,
+    pub debtor_repayment_transaction_id: transaction::Id,
 }
 
 pub fn base_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
@@ -27,10 +39,10 @@ pub fn base_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
     return Ok(base_path);
 }
 
-pub fn all_metas(profile: &String) -> Result<Vec<BatchMetadata>, Box<dyn std::error::Error>> {
+pub fn all_batches(profile: &String) -> Result<Vec<Batch>, Box<dyn std::error::Error>> {
     let path = get_or_create_data_dir(profile)?;
     let dir = fs::read_dir(path)?;
-    let mut parsed_metas: Vec<BatchMetadata> = Vec::new();
+    let mut parsed_metas: Vec<Batch> = Vec::new();
     for entry in dir {
         let path = match entry?.path().to_str() {
             Some(s) => s.to_string(),
@@ -40,75 +52,61 @@ pub fn all_metas(profile: &String) -> Result<Vec<BatchMetadata>, Box<dyn std::er
             continue;
         }
         let file = fs::read_to_string(path)?;
-        let parsed: BatchMetadata = serde_json::from_str(&file)?;
+        let parsed: Batch = serde_json::from_str(&file)?;
         parsed_metas.push(parsed);
     }
     return Ok(parsed_metas);
 }
 
-pub fn unreconciled_metas(
-    profile: &String,
-) -> Result<Vec<BatchMetadata>, Box<dyn std::error::Error>> {
-    all_metas(profile)?
+pub fn unreconciled_batches(profile: &String) -> Result<Vec<Batch>, Box<dyn std::error::Error>> {
+    all_batches(profile)?
         .into_iter()
-        .filter(|m| !(*m).reconciled)
+        .filter(|m| (*m).reconciliation.is_none())
         .map(|m| Ok(m))
         .collect()
 }
 
-pub fn metadata_for_batch(
+pub fn get_batch(
     batch_name: &String,
     profile: &String,
-) -> Result<BatchMetadata, Box<dyn std::error::Error>> {
+) -> Result<Batch, Box<dyn std::error::Error>> {
     let filename = filename_for(batch_name, profile)?;
     let file = fs::read_to_string(&filename)
-        .map_err(|e| format!("error reading metadata file {}, {}", filename.display(), e))?;
-    let parsed: BatchMetadata = serde_json::from_str(&file)?;
+        .map_err(|e| format!("error reading batch file {}, {}", filename.display(), e))?;
+    let parsed: Batch = serde_json::from_str(&file)?;
     return Ok(parsed);
 }
 
-pub fn save_new_batch_metadata(
-    batch_name: &String,
-    start_date: NaiveDate,
-    end_date: NaiveDate,
-    profile: &String,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let new_meta = BatchMetadata {
-        name: batch_name.to_owned(),
-        start_date: start_date,
-        end_date: end_date,
-        reconciled: false,
-    };
-
-    tracing::debug!(?new_meta, "saving new batch metadata");
+pub fn save_batch(batch: Batch, profile: &String) -> Result<(), Box<dyn std::error::Error>> {
+    tracing::debug!(?batch, "saving batch");
 
     if config::is_dry_run() {
         return Ok(());
     }
 
-    let json = serde_json::to_string_pretty(&new_meta)?;
-    fs::write(filename_for(batch_name, profile)?, json)?;
+    let json = serde_json::to_string_pretty(&batch)?;
+    fs::write(filename_for(&batch.name, profile)?, json)?;
     Ok(())
 }
 
-pub fn set_reconciled(
-    batch_name: &String,
-    reconciled: bool,
-    profile: &String,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let mut metadata = metadata_for_batch(batch_name, profile)?;
-    metadata.reconciled = reconciled;
+// pub fn set_reconciled(
+//     batch_name: &String,
+//     reconciled: bool,
+//     profile: &String,
+// ) -> Result<(), Box<dyn std::error::Error>> {
+//     let mut metadata = get_batch(batch_name, profile)?;
+//     metadata.reconciled = reconciled;
 
-    tracing::debug!(?metadata, "setting reconciled = true in batch metadata");
+//     tracing::debug!(?metadata, "setting reconciled = true in batch data");
 
-    if config::is_dry_run() {
-        return Ok(());
-    }
+//     if config::is_dry_run() {
+//         return Ok(());
+//     }
 
-    let json = serde_json::to_string_pretty(&metadata)?;
-    fs::write(filename_for(batch_name, profile)?, json)?;
-    Ok(())
-}
+//     let json = serde_json::to_string_pretty(&metadata)?;
+//     fs::write(filename_for(batch_name, profile)?, json)?;
+//     Ok(())
+// }
 
 fn filename_for(
     batch_name: &String,
