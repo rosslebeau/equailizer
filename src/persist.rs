@@ -1,4 +1,7 @@
-use crate::config;
+use crate::{
+    config,
+    lunch_money::model::transaction::{self, Transaction},
+};
 use chrono::NaiveDate;
 use display_json::DebugAsJson;
 use serde::{Deserialize, Serialize};
@@ -9,6 +12,7 @@ pub struct BatchMetadata {
     pub name: String,
     pub start_date: NaiveDate,
     pub end_date: NaiveDate,
+    pub transaction_ids: Vec<transaction::Id>,
     pub reconciled: bool,
 }
 
@@ -68,17 +72,15 @@ pub fn metadata_for_batch(
 }
 
 pub fn save_new_batch_metadata(
-    batch_name: &String,
-    start_date: NaiveDate,
-    end_date: NaiveDate,
+    new_meta: BatchMetadata,
     profile: &String,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let new_meta = BatchMetadata {
-        name: batch_name.to_owned(),
-        start_date: start_date,
-        end_date: end_date,
-        reconciled: false,
-    };
+    // let new_meta = BatchMetadata {
+    //     name: batch_name.to_owned(),
+    //     start_date: start_date,
+    //     end_date: end_date,
+    //     reconciled: false,
+    // };
 
     tracing::debug!(?new_meta, "saving new batch metadata");
 
@@ -87,7 +89,7 @@ pub fn save_new_batch_metadata(
     }
 
     let json = serde_json::to_string_pretty(&new_meta)?;
-    fs::write(filename_for(batch_name, profile)?, json)?;
+    fs::write(filename_for(&new_meta.name, profile)?, json)?;
     Ok(())
 }
 

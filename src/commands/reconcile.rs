@@ -46,6 +46,7 @@ pub async fn reconcile_batch(
         .await?;
 
     let creditor_batch = get_creditor_batch_from_txns(creditor_txns, &batch_name, config).await?;
+    // let creditor_batch2 =
 
     let batch_total = creditor_batch
         .proxy_txns
