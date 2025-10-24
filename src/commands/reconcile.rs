@@ -16,7 +16,7 @@ pub async fn reconcile_all(
     config: &Config,
     profile: &String,
 ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-    let unreconciled = persist::unreconciled_metas(profile)?;
+    let unreconciled = persist::unreconciled_batches(profile)?;
     for meta in &unreconciled {
         reconcile_batch(
             &meta.name,
@@ -32,11 +32,10 @@ pub async fn reconcile_all(
 
 pub async fn reconcile_batch(
     batch_name: &String,
-    search_start_date: NaiveDate,
-    search_end_date: NaiveDate,
     config: &Config,
     profile: &String,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let batch =
     let lm_creditor_client = crate::lunch_money::api::Client {
         auth_token: config.creditor.api_key.to_owned(),
     };

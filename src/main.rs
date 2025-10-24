@@ -37,11 +37,9 @@ async fn main() {
         },
         cli::Commands::Reconcile {
             batch_name,
-            start,
-            end_date,
             profile,
             dry_run,
-        } => match handle_reconcile(batch_name, start, end_date, profile, dry_run).await {
+        } => match handle_reconcile(batch_name, profile, dry_run).await {
             Ok(output) => tracing::info!(output),
             Err(e) => tracing::error!(e, "reconciling batch failed"),
         },
@@ -79,8 +77,6 @@ async fn handle_create_batch(
 
 async fn handle_reconcile(
     batch_name: String,
-    start: StartArgs,
-    end_date: Option<NaiveDate>,
     profile: String,
     dry_run: bool,
 ) -> Result<String, Box<dyn std::error::Error>> {

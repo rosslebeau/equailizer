@@ -1,6 +1,6 @@
 use crate::config::{self, *};
 use crate::email;
-use crate::persist::BatchMetadata;
+use crate::persist::Batch;
 use crate::usd::USD;
 use crate::{
     lunch_money, lunch_money::api::Client, lunch_money::api::update_transaction,
@@ -100,8 +100,8 @@ pub async fn run(
         return Err("no valid transactions with batching tag found".into());
     }
 
-    persist::save_new_batch_metadata(
-        BatchMetadata {
+    persist::save_new_batch(
+        Batch {
             name: batch_label.to_owned(),
             start_date: earliest_txn_date,
             end_date: end_date,
