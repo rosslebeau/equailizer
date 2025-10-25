@@ -13,17 +13,12 @@ use rand::random_bool;
 use rust_decimal::prelude::*;
 use uuid::{self, Uuid};
 
-pub struct SuccessResult {
-    pub batch_label: String,
-    pub batch_amount: USD,
-}
-
 pub async fn run(
     start_date: NaiveDate,
     end_date: NaiveDate,
     config: &Config,
     profile: &String,
-) -> Result<SuccessResult, Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error>> {
     let span = tracing::info_span!("create batch");
     let _enter = span.enter();
     tracing::debug!("starting starting create batch");
@@ -101,7 +96,7 @@ pub async fn run(
     }
 
     persist::save_batch(
-        Batch {
+        &Batch {
             name: batch_label.to_owned(),
             start_date: earliest_txn_date,
             end_date: end_date,
@@ -114,11 +109,9 @@ pub async fn run(
 
     email::send_email(&batch_label, &batch_total, config).await?;
 
-    let result = SuccessResult {
-        batch_label: batch_label,
-        batch_amount: batch_total,
-    };
-    return Ok(result);
+    tracing::info!(batch_label, %batch_total, "Created batch successfully");
+
+    return Ok(());
 }
 
 // Returns the debtor's split id and amount, because that's all we care about for now

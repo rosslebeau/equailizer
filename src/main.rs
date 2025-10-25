@@ -32,7 +32,7 @@ async fn main() {
             profile,
             dry_run,
         } => match handle_create_batch(start, end_date, profile, dry_run).await {
-            Ok(output) => tracing::info!(output),
+            Ok(_) => tracing::info!("Finished create-batch command successfully"),
             Err(e) => tracing::error!(e, "creating batch failed"),
         },
         cli::Commands::Reconcile {
@@ -40,19 +40,19 @@ async fn main() {
             profile,
             dry_run,
         } => match handle_reconcile(batch_name, profile, dry_run).await {
-            Ok(output) => tracing::info!(output),
+            Ok(_) => tracing::info!("Finished reconcile command successfully"),
             Err(e) => tracing::error!(e, "reconciling batch failed"),
         },
         cli::Commands::ReconcileAll { profile, dry_run } => {
             match handle_reconcile_all(profile, dry_run).await {
-                Ok(()) => tracing::info!("Successfully reconciled all outstanding batches"),
-                Err(e) => tracing::error!(e, "reconciling failed"),
+                Ok(_) => tracing::info!("Finished reconcile-all command successfully"),
+                Err(e) => tracing::error!(e, "reconcile-all failed"),
             }
         }
     }
 
     if config::is_dry_run() {
-        tracing::info!("dry run ended");
+        tracing::info!("Dry run ended");
     }
 
     drop(log_guard);
@@ -63,27 +63,24 @@ async fn handle_create_batch(
     end_date: Option<NaiveDate>,
     profile: String,
     dry_run: bool,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error>> {
     config::set_dry_run(dry_run);
     let config = config::read_config(&profile)?;
     let start_date = cli::start_date_from_args(start);
     let end_date = end_date.or_naive_date_now();
-    let result = commands::create_batch::run(start_date, end_date, &config, &profile).await?;
-    return Ok(format!(
-        "Successfully created batch!\nBatch label: {}\nBatch amount: {}",
-        result.batch_label, result.batch_amount
-    ));
+    commands::create_batch::run(start_date, end_date, &config, &profile).await?;
+    return Ok(());
 }
 
 async fn handle_reconcile(
     batch_name: String,
     profile: String,
     dry_run: bool,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error>> {
     config::set_dry_run(dry_run);
     let config = config::read_config(&profile)?;
     commands::reconcile::reconcile_batch_name(&batch_name, &config, &profile).await?;
-    return Ok(format!("Successfully reconciled batch: {}", batch_name));
+    return Ok(());
 }
 
 async fn handle_reconcile_all(

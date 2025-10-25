@@ -43,6 +43,7 @@ pub async fn reconcile_batch(
     let creditor_new_txns = lm_creditor_client
         .get_transactions(batch.end_date, date_helpers::now_date_naive_eastern())
         .await?;
+
     let creditor_reconciliation_txn = creditor_new_txns
         .iter()
         .filter(|t| {
@@ -81,8 +82,21 @@ pub async fn reconcile_batch(
         .get_transactions(batch.end_date, date_helpers::now_date_naive_eastern())
         .await?;
 
-    let debtor_repayment_txn =
-        get_debtor_repayment_txn_from_txns(debtor_txns, &batch.name, config)?;
+    // let debtor_repayment_txn =
+    //     get_debtor_repayment_txn_from_txns(debtor_txns, &batch.name, config)?;
+
+    let debtor_repayment_txn = debtor_txns
+        .iter()
+        .filter(|t| {
+            t.amount == batch.amount
+                && t.plaid_account_id
+                    .is_some_and(|acct| acct == config.debtor.repayment_account_id)
+        })
+        .collect::<Vec<&Transaction>>()
+        .first()
+        .ok_or("no suitable debtor reconciliation transaction found")?
+        .to_owned()
+        .to_owned();
 
     let debtor_splits: Vec<Split> = create_debtor_splits(&creditor_batch_txns);
 
@@ -110,7 +124,9 @@ pub async fn reconcile_batch(
         }),
     };
 
-    persist::save_batch(updated_batch, profile)?;
+    persist::save_batch(&updated_batch, profile)?;
+
+    tracing::info!(updated_batch.name, "Reconciled batch");
 
     return Ok(());
 }

@@ -77,14 +77,14 @@ pub fn get_batch(
     return Ok(parsed);
 }
 
-pub fn save_batch(batch: Batch, profile: &String) -> Result<(), Box<dyn std::error::Error>> {
+pub fn save_batch(batch: &Batch, profile: &String) -> Result<(), Box<dyn std::error::Error>> {
     tracing::debug!(?batch, "saving batch");
 
     if config::is_dry_run() {
         return Ok(());
     }
 
-    let json = serde_json::to_string_pretty(&batch)?;
+    let json = serde_json::to_string_pretty(batch)?;
     fs::write(filename_for(&batch.name, profile)?, json)?;
     Ok(())
 }
