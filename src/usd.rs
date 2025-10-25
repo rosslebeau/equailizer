@@ -1,7 +1,7 @@
-use rust_decimal::Decimal;
+use rust_decimal::{Decimal, dec};
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::ops::{Add, Div, Mul, Sub};
+use std::ops::{Add, Div, Mul, Neg, Sub};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct USD(Decimal);
@@ -51,6 +51,14 @@ impl Div<Decimal> for USD {
 
     fn div(self, divisor: Decimal) -> USD {
         USD::new(self.0 / divisor)
+    }
+}
+
+impl Neg for USD {
+    type Output = USD;
+
+    fn neg(self) -> Self::Output {
+        USD::new(dec!(0)) - self
     }
 }
 

@@ -69,8 +69,7 @@ pub async fn send_email(
     email.body_value(
         "t1".to_string(),
         format!(
-            "New batch ready: {}\n\nClick here to initiate Venmo request: {}",
-            batch_label,
+            "New batch ready!\n\nClick here to initiate Venmo request: {}",
             venmo_request_link(&config.debtor.venmo_username, batch_label, amount)
         ),
     );
@@ -83,13 +82,12 @@ pub async fn send_email(
             "
 <html>
 <body>
-    <p>New batch ready: {}</p>
+    <p>New batch ready!</p>
     <a href=\"{}\" style=\"display:inline-block; padding:10px 20px; font-size:14px; color:#ffffff;
         background-color:#007BFF; text-decoration:none; border-radius:6px;\">Request Batch</a>
 </body>
 </html>
 ",
-            batch_label,
             venmo_request_link(&config.debtor.venmo_username, batch_label, amount)
         ),
     );

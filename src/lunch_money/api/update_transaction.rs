@@ -118,7 +118,9 @@ impl Client {
         tracing::debug!(txn_id, ?txn_update_body, "updating transaction");
 
         if config::is_dry_run() {
-            return Ok(self::Response { splits: None });
+            return Ok(self::Response {
+                splits: Some(vec![0, 1]),
+            });
         }
 
         let client = reqwest::Client::new();

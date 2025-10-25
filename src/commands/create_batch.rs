@@ -100,13 +100,14 @@ pub async fn run(
         return Err("no valid transactions with batching tag found".into());
     }
 
-    persist::save_new_batch(
+    persist::save_batch(
         Batch {
             name: batch_label.to_owned(),
             start_date: earliest_txn_date,
             end_date: end_date,
+            amount: batch_total,
             transaction_ids: batch_txn_ids,
-            reconciled: false,
+            reconciliation: None,
         },
         profile,
     )?;
