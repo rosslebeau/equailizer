@@ -1,21 +1,29 @@
 [package]
 name = "equailizer"
-version = "0.1.1"
+version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-    reqwest = { version = "0.11", features = ["json"] }
-    serde = { version = "1.0", features = ["derive"] }
-    serde_json = "1.0"
-    tokio = { version = "1", features = ["full"] }
-    rust_decimal = { version = "1.37", features = ["serde-with-str", "macros"] }
-    chrono = { version = "0.4", features = ["serde"] }
-    chrono-tz = "0.10"
-    clap = { version = "4.5", features = ["derive"] }
-    uuid = { version = "1.18", features = ["v4"] }
-    rand = "0.9"
-    jmap-client = "0.3"
-    tracing = "0.1"
-    tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "time"] }
-    tracing-appender = "0.2"   # for rolling file + non-blocking writer
-    display_json = "0.2"
+reqwest = { version = "0.12", default-features = false, features = [
+  "json",
+  "http2",
+  "rustls-tls-webpki-roots",
+] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1", features = ["full"] }
+rust_decimal = { version = "1.37", features = ["serde-with-str", "macros"] }
+chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = "0.10"
+clap = { version = "4.5", features = ["derive"] }
+uuid = { version = "1.18", features = ["v4"] }
+rand = "0.9"
+jmap-client = "0.3"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = [
+  "env-filter",
+  "fmt",
+  "time",
+] }
+tracing-appender = "0.2" # for rolling file + non-blocking writer
+display_json = "0.2"
