@@ -1,5 +1,6 @@
 use crate::{
     config::{self, *},
+    date_helpers,
     usd::USD,
 };
 use jmap_client::{core::response::MethodResponse::*, email::EmailBodyPart};
@@ -65,12 +66,15 @@ pub async fn send_email(
     email.subject("Quail alert! Batch ready from equailizer");
     email.mailbox_ids([&config.jmap.sent_mailbox]);
 
+    let venmo_text = format!("equailizer_{}", date_helpers::now_date_naive_eastern());
+    let venmo_request_link = venmo_request_link(&config.debtor.venmo_username, &venmo_text, amount);
+
     let text_body_id = EmailBodyPart::new().part_id("t1");
     email.body_value(
         "t1".to_string(),
         format!(
-            "New batch ready!\n\nClick here to initiate Venmo request: {}",
-            venmo_request_link(&config.debtor.venmo_username, batch_label, amount)
+            "New batch ready!\n\nClick here to initiate Venmo request: {}\n\nbatch id: {}",
+            venmo_request_link, batch_label
         ),
     );
     email.text_body(text_body_id);
@@ -85,10 +89,11 @@ pub async fn send_email(
     <p>New batch ready!</p>
     <a href=\"{}\" style=\"display:inline-block; padding:10px 20px; font-size:14px; color:#ffffff;
         background-color:#007BFF; text-decoration:none; border-radius:6px;\">Request Batch</a>
+    <p>batch id: {}</p>
 </body>
 </html>
 ",
-            venmo_request_link(&config.debtor.venmo_username, batch_label, amount)
+            venmo_request_link, batch_label
         ),
     );
     email.html_body(html_body_id);
@@ -120,9 +125,9 @@ pub async fn send_email(
     Ok(())
 }
 
-fn venmo_request_link(venmo_username: &String, batch_label: &String, amount: &USD) -> String {
+fn venmo_request_link(venmo_username: &String, text: &String, amount: &USD) -> String {
     format!(
         "https://venmo.com/{}?txn=charge&note={}&amount={}",
-        venmo_username, batch_label, amount
+        venmo_username, text, amount
     )
 }
