@@ -82,8 +82,7 @@ impl Client {
         #[derive(Debug, Deserialize)]
         struct SuccessResponse {
             updated: bool,
-            #[allow(dead_code)]
-            splits: Option<Vec<TransactionId>>,
+            split: Option<Vec<TransactionId>>,
         }
 
         #[derive(Debug, Deserialize)]
@@ -136,10 +135,12 @@ impl Client {
         let http_code = response.status();
         let result: Response = response.json().await?;
 
+        tracing::debug!(?result, "Received transaction update response");
+
         match result {
             Response::Success(s) => {
                 if s.updated {
-                    return Ok(self::Response { splits: s.splits });
+                    return Ok(self::Response { splits: s.split });
                 } else {
                     return Err("http 200 but transaction not updated".into());
                 }
