@@ -37,10 +37,9 @@ pub async fn reconcile_batch(
         auth_token: config.creditor.api_key.to_owned(),
     };
 
-    let mut creditor_batch_txns: Vec<Transaction> = Vec::new();
-    for txn_id in &batch.transaction_ids {
-        creditor_batch_txns.push(lm_creditor_client.get_transaction(*txn_id).await?);
-    }
+    let creditor_batch_txns = lm_creditor_client
+        .get_transactions_by_id(&batch.transaction_ids)
+        .await?;
 
     // Find creditor's reconciliation txn
     // Transaction must have occurred between the last txn in the batch and the current date
