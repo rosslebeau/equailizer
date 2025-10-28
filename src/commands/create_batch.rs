@@ -61,8 +61,7 @@ pub async fn run(
                     earliest_txn_date = txn.date;
                 }
 
-                let (split_id, split_amt) =
-                    split_txn(&txn, &batch_label, &lm_creditor_client, config).await?;
+                let (split_id, split_amt) = split_txn(&txn, &lm_creditor_client, config).await?;
                 batch_txn_ids.push(split_id);
                 batch_total = batch_total + split_amt;
             }
@@ -117,13 +116,12 @@ pub async fn run(
 // Returns the debtor's split id and amount, because that's all we care about for now
 async fn split_txn(
     txn: &Transaction,
-    batch_label: &String,
     client: &Client,
     config: &Config,
 ) -> Result<(TransactionId, USD), Box<dyn std::error::Error>> {
     tracing::debug!(txn.id, "splitting transaction");
 
-    let splits = create_random_even_splits(&txn, &batch_label, config);
+    let splits = create_random_even_splits(&txn, config);
     let debtor_split_amt = splits.debtor_split.amount;
 
     let txn_update = update_transaction::TransactionUpdate {
@@ -210,11 +208,7 @@ struct EvenSplit {
     debtor_split: Split,
 }
 
-fn create_random_even_splits(
-    txn: &Transaction,
-    batch_label: &String,
-    config: &Config,
-) -> EvenSplit {
+fn create_random_even_splits(txn: &Transaction, config: &Config) -> EvenSplit {
     let (creditor_amt, debtor_amt) = random_even_split(txn.amount);
 
     let creditor_split = lunch_money::api::update_transaction::Split {
@@ -228,7 +222,7 @@ fn create_random_even_splits(
         amount: debtor_amt,
         payee: None,
         category_id: Some(config.creditor.proxy_category_id),
-        notes: Some(batch_label.to_owned()),
+        notes: None,
         date: None,
     };
     return EvenSplit {
