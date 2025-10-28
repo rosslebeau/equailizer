@@ -19,9 +19,9 @@ pub async fn run(
     config: &Config,
     profile: &String,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let span = tracing::info_span!("create batch");
+    let span = tracing::info_span!("Create Batch");
     let _enter = span.enter();
-    tracing::debug!("starting starting create batch");
+    tracing::debug!("Starting create batch");
 
     if start_date.cmp(&end_date) == std::cmp::Ordering::Greater {
         return Err("start date cannot be after end date".into());
