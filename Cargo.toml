@@ -27,3 +27,4 @@ tracing-subscriber = { version = "0.3", features = [
 ] }
 tracing-appender = "0.2" # for rolling file + non-blocking writer
 display_json = "0.2"
+askama = "0.14"

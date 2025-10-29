@@ -43,14 +43,18 @@ pub async fn run(
     let mut found_valid_txns = false;
     let mut earliest_txn_date = end_date;
     let mut batch_txn_ids: Vec<TransactionId> = Vec::new();
+    let mut batch_txns_for_email: Vec<email::Txn> = Vec::new();
     for txn in txns {
         let tag_names: Vec<String> = txn.tags.iter().map(|t| t.name.to_owned()).collect();
         if tag_names.contains(&config::TAG_BATCH_SPLIT.into()) {
             tracing::debug!(txn.id, "found split tag");
             if txn.has_children {
+                // Remove the eq split tag because tags are hidden on the parent of splits in the UI
+                // and so this is an invisible mistake by the user
+                // TODO: Consider notifying somehow that this happened, just so the user can double-check
                 tracing::debug!(
                     txn.id,
-                    "transaction has children. invalid target for split. removing split tag"
+                    "transaction has children. invalid target for split. removing eq split tag"
                 );
 
                 remove_tag(&txn, config::TAG_BATCH_SPLIT.into(), &lm_creditor_client).await?;
@@ -64,6 +68,11 @@ pub async fn run(
                 let (split_id, split_amt) = split_txn(&txn, &lm_creditor_client, config).await?;
                 batch_txn_ids.push(split_id);
                 batch_total = batch_total + split_amt;
+                batch_txns_for_email.push(email::Txn {
+                    payee: txn.payee,
+                    amount: split_amt,
+                    date: txn.date,
+                });
             }
         } else if tag_names.contains(&config::TAG_BATCH_ADD.into()) {
             tracing::debug!(txn.id, "found batch tag");
@@ -86,6 +95,11 @@ pub async fn run(
 
                 add_txn_to_batch(&txn, &lm_creditor_client, config).await?;
                 batch_txn_ids.push(txn.id);
+                batch_txns_for_email.push(email::Txn {
+                    payee: txn.payee,
+                    amount: txn.amount,
+                    date: txn.date,
+                });
             }
         }
     }
@@ -106,7 +120,7 @@ pub async fn run(
         profile,
     )?;
 
-    email::send_email(&batch_label, &batch_total, config).await?;
+    email::send_email(&batch_label, &batch_total, batch_txns_for_email, config).await?;
 
     tracing::info!(batch_label, %batch_total, "Created batch successfully");
 
