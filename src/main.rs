@@ -1,3 +1,5 @@
+#![recursion_limit = "512"]
+
 mod cli;
 mod commands;
 mod config;
@@ -8,16 +10,51 @@ mod lunch_money;
 mod persist;
 pub mod usd;
 
+use crate::usd::USD;
 use chrono::NaiveDate;
 use clap::Parser;
+use rust_decimal::dec;
 
-use crate::cli::StartArgs;
+use crate::{cli::StartArgs, email::Txn};
 use core::result::Result;
 use date_helpers::*;
 
 #[tokio::main]
 async fn main() {
     let log_guard = log::init_tracing();
+
+    let html_string = email::make_html_string(
+        vec![
+            Txn {
+                payee: "Associated Market".to_string(),
+                amount: USD::new(dec!(17.32)),
+                date: NaiveDate::from_ymd_opt(2025, 10, 21).expect("x"),
+            },
+            Txn {
+                payee: "Winner".to_string(),
+                amount: USD::new(dec!(9.18)),
+                date: NaiveDate::from_ymd_opt(2025, 10, 23).expect("x"),
+            },
+            Txn {
+                payee: "JetBlue".to_string(),
+                amount: USD::new(dec!(345.85)),
+                date: NaiveDate::from_ymd_opt(2025, 10, 24).expect("x"),
+            },
+            Txn {
+                payee: "Mountain House Manhattan".to_string(),
+                amount: USD::new(dec!(55.11)),
+                date: NaiveDate::from_ymd_opt(2025, 10, 24).expect("x"),
+            },
+            Txn {
+                payee: "Corn".to_string(),
+                amount: USD::new(dec!(2.80)),
+                date: NaiveDate::from_ymd_opt(2025, 10, 21).expect("x"),
+            },
+        ],
+        "testlink".to_string(),
+    );
+    println!("html: {}", html_string);
+    panic!("x");
 
     if config::is_dry_run() {
         tracing::info!("dry run beginning");

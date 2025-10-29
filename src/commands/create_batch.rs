@@ -43,6 +43,7 @@ pub async fn run(
     let mut found_valid_txns = false;
     let mut earliest_txn_date = end_date;
     let mut batch_txn_ids: Vec<TransactionId> = Vec::new();
+    let mut batch_txns_for_email: Vec<email::Txn> = Vec::new();
     for txn in txns {
         let tag_names: Vec<String> = txn.tags.iter().map(|t| t.name.to_owned()).collect();
         if tag_names.contains(&config::TAG_BATCH_SPLIT.into()) {
@@ -106,7 +107,7 @@ pub async fn run(
         profile,
     )?;
 
-    email::send_email(&batch_label, &batch_total, config).await?;
+    email::send_email(&batch_label, &batch_total, batch_txns_for_email, config).await?;
 
     tracing::info!(batch_label, %batch_total, "Created batch successfully");
 

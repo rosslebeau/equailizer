@@ -1,13 +1,25 @@
 use crate::{
     config::{self, *},
     date_helpers,
+    lunch_money::model::transaction,
+    persist::Batch,
     usd::USD,
 };
+use askama::Template;
+use chrono::NaiveDate;
 use jmap_client::{core::response::MethodResponse::*, email::EmailBodyPart};
+use std::collections::HashMap;
+
+pub struct Txn {
+    pub payee: String,
+    pub amount: USD,
+    pub date: NaiveDate,
+}
 
 pub async fn send_email(
-    batch_label: &String,
+    batch_id: &String,
     amount: &USD,
+    txns: Vec<Txn>,
     config: &Config,
 ) -> Result<(), Box<dyn std::error::Error>> {
     tracing::debug!(
@@ -74,28 +86,14 @@ pub async fn send_email(
         "t1".to_string(),
         format!(
             "New batch ready!\n\nClick here to initiate Venmo request: {}\n\nbatch id: {}",
-            venmo_request_link, batch_label
+            venmo_request_link, batch_id
         ),
     );
     email.text_body(text_body_id);
 
     let html_body_id = EmailBodyPart::new().part_id("t2");
-    email.body_value(
-        "t2".to_string(),
-        format!(
-            "
-<html>
-<body>
-    <p>New batch ready!</p>
-    <a href=\"{}\" style=\"display:inline-block; padding:10px 20px; font-size:14px; color:#ffffff;
-        background-color:#007BFF; text-decoration:none; border-radius:6px;\">Request Batch</a>
-    <p>batch id: {}</p>
-</body>
-</html>
-",
-            venmo_request_link, batch_label
-        ),
-    );
+    let html_text = make_html_string(txns, venmo_request_link);
+    email.body_value("t2".to_string(), html_text);
     email.html_body(html_body_id);
 
     let email_response = match email_req.send().await?.pop_method_response() {
@@ -130,4 +128,29 @@ fn venmo_request_link(venmo_username: &String, text: &String, amount: &USD) -> S
         "https://venmo.com/{}?txn=charge&note={}&amount={}",
         venmo_username, text, amount
     )
+}
+
+#[derive(Template)] // this will generate the code...
+#[template(path = "batch_ready_email.html")]
+struct BatchReadyEmailTemplate {
+    txns_by_date: HashMap<String, Vec<Txn>>,
+    venmo_request_link: String,
+}
+
+pub fn make_html_string(txns: Vec<Txn>, venmo_request_link: String) -> String {
+    let txns_by_date: HashMap<String, Vec<Txn>> =
+        txns.into_iter()
+            .fold(HashMap::<String, Vec<Txn>>::new(), |mut acc, txn| {
+                acc.entry(txn.date.format("%b %d, %Y").to_string())
+                    .or_insert_with(Vec::new)
+                    .push(txn);
+                acc
+            });
+
+    let email = BatchReadyEmailTemplate {
+        txns_by_date: txns_by_date,
+        venmo_request_link: venmo_request_link,
+    };
+
+    return email.render().unwrap();
 }

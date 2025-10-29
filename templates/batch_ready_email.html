@@ -1,0 +1,51 @@
+<!doctype html>
+<html>
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <style>
+            .btn_venmo {
+                display: inline-block;
+                padding: 10px 20px;
+                font-size: 14px;
+                color: #ffffff;
+                background-color: #007bff;
+                text-decoration: none;
+                border-radius: 6px;
+            }
+            .days_list_item {
+                padding-top: 14px;
+            }
+            ul {
+                list-style: none;
+            }
+            .days_list {
+                padding-left: 0;
+            }
+            .txns_list {
+                padding-top: 6px;
+            }
+        </style>
+    </head>
+    <body>
+        <p>New batch ready!</p>
+        <a href="{{ venmo_request_link }}" class="btn_venmo"
+            >Request on Venmo
+        </a>
+        <div>
+            Transactions:
+            <ul class="days_list">
+                {% for (date, txns) in txns_by_date %}
+                <li class="days_list_item">
+                    <span style="font-weight: bold">{{ date }}</span>
+                    <ul class="txns_list">
+                        {% for txn in txns %}
+                        <li>{{ txn.payee }} ${{ txn.amount }}</li>
+                        {% endfor %}
+                    </ul>
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+    </body>
+</html>
