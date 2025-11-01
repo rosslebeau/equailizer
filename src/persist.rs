@@ -89,25 +89,6 @@ pub fn save_batch(batch: &Batch, profile: &String) -> Result<(), Box<dyn std::er
     Ok(())
 }
 
-// pub fn set_reconciled(
-//     batch_name: &String,
-//     reconciled: bool,
-//     profile: &String,
-// ) -> Result<(), Box<dyn std::error::Error>> {
-//     let mut metadata = get_batch(batch_name, profile)?;
-//     metadata.reconciled = reconciled;
-
-//     tracing::debug!(?metadata, "setting reconciled = true in batch data");
-
-//     if config::is_dry_run() {
-//         return Ok(());
-//     }
-
-//     let json = serde_json::to_string_pretty(&metadata)?;
-//     fs::write(filename_for(batch_name, profile)?, json)?;
-//     Ok(())
-// }
-
 fn filename_for(
     batch_name: &String,
     profile: &String,

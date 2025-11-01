@@ -57,7 +57,8 @@ pub async fn run(
                     "transaction has children. invalid target for split. removing eq split tag"
                 );
 
-                remove_tag(&txn, config::TAG_BATCH_SPLIT.into(), &lm_creditor_client).await?;
+                update_by_removing_tag(&txn, config::TAG_BATCH_SPLIT.into(), &lm_creditor_client)
+                    .await?;
             } else {
                 found_valid_txns = true;
 
@@ -65,7 +66,8 @@ pub async fn run(
                     earliest_txn_date = txn.date;
                 }
 
-                let (split_id, split_amt) = split_txn(&txn, &lm_creditor_client, config).await?;
+                let (split_id, split_amt) =
+                    update_by_splitting_txn(&txn, &lm_creditor_client, config).await?;
                 batch_txn_ids.push(split_id);
                 batch_total = batch_total + split_amt;
                 batch_txns_for_email.push(email::Txn {
@@ -83,7 +85,8 @@ pub async fn run(
                     "transaction has children. invalid target for batching. removing split tag"
                 );
 
-                remove_tag(&txn, config::TAG_BATCH_SPLIT.into(), &lm_creditor_client).await?;
+                update_by_removing_tag(&txn, config::TAG_BATCH_SPLIT.into(), &lm_creditor_client)
+                    .await?;
             } else {
                 found_valid_txns = true;
 
@@ -93,7 +96,7 @@ pub async fn run(
 
                 batch_total = batch_total + txn.amount;
 
-                add_txn_to_batch(&txn, &lm_creditor_client, config).await?;
+                update_batched_transaction(&txn, &lm_creditor_client, config).await?;
                 batch_txn_ids.push(txn.id);
                 batch_txns_for_email.push(email::Txn {
                     payee: txn.payee,
@@ -128,7 +131,7 @@ pub async fn run(
 }
 
 // Returns the debtor's split id and amount, because that's all we care about for now
-async fn split_txn(
+async fn update_by_splitting_txn(
     txn: &Transaction,
     client: &Client,
     config: &Config,
@@ -162,7 +165,7 @@ async fn split_txn(
     return Ok((debtor_split_id, debtor_split_amt));
 }
 
-async fn remove_tag(
+async fn update_by_removing_tag(
     txn: &Transaction,
     tag_to_remove: String,
     client: &Client,
@@ -179,7 +182,7 @@ async fn remove_tag(
     return Ok(());
 }
 
-async fn add_txn_to_batch(
+async fn update_batched_transaction(
     txn: &Transaction,
     client: &Client,
     config: &Config,
