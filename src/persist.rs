@@ -1,27 +1,24 @@
 use crate::{
     config,
-    lunch_money::model::transaction::{self},
+    lunch_money::model::transaction::{self, TransactionId},
     usd::USD,
 };
-use chrono::NaiveDate;
 use display_json::DebugAsJson;
 use serde::{Deserialize, Serialize};
 use std::{fs, path::PathBuf};
 
 #[derive(DebugAsJson, Deserialize, Serialize)]
 pub struct Batch {
-    pub name: String,
-    pub start_date: NaiveDate,
-    pub end_date: NaiveDate,
+    pub id: String,
     pub amount: USD,
-    pub transaction_ids: Vec<transaction::Id>,
+    pub transaction_ids: Vec<TransactionId>,
     pub reconciliation: Option<Reconciliation>,
 }
 
 #[derive(DebugAsJson, Deserialize, Serialize)]
 pub struct Reconciliation {
-    pub creditor_repayment_transaction_id: transaction::Id,
-    pub debtor_repayment_transaction_id: transaction::Id,
+    pub creditor_repayment_transaction_id: TransactionId,
+    pub debtor_repayment_transaction_id: TransactionId,
 }
 
 pub fn base_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
@@ -85,7 +82,7 @@ pub fn save_batch(batch: &Batch, profile: &String) -> Result<(), Box<dyn std::er
     }
 
     let json = serde_json::to_string_pretty(batch)?;
-    fs::write(filename_for(&batch.name, profile)?, json)?;
+    fs::write(filename_for(&batch.id, profile)?, json)?;
     Ok(())
 }
 

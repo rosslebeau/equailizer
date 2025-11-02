@@ -4,6 +4,7 @@ name = "equailizer"
 version = "0.1.0"
 
 [dependencies]
+anyhow = "1.0"
 askama = "0.14"
 chrono = { version = "0.4", features = ["serde"] }
 chrono-tz = "0.10"

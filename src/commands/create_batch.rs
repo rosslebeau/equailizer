@@ -4,9 +4,8 @@ use crate::persist::Batch;
 use crate::usd::USD;
 use crate::{
     lunch_money, lunch_money::api::Client, lunch_money::api::update_transaction,
-    lunch_money::api::update_transaction::Split,
-    lunch_money::model::transaction::Id as TransactionId, lunch_money::model::transaction::*,
-    persist,
+    lunch_money::api::update_transaction::Split, lunch_money::model::transaction::TransactionId,
+    lunch_money::model::transaction::*, persist,
 };
 use chrono::NaiveDate;
 use rand::random_bool;
@@ -41,7 +40,6 @@ pub async fn run(
     tracing::debug!(?txns, "received transactions");
 
     let mut found_valid_txns = false;
-    let mut earliest_txn_date = end_date;
     let mut batch_txn_ids: Vec<TransactionId> = Vec::new();
     let mut batch_txns_for_email: Vec<email::Txn> = Vec::new();
     for txn in txns {
@@ -61,10 +59,6 @@ pub async fn run(
                     .await?;
             } else {
                 found_valid_txns = true;
-
-                if txn.date < earliest_txn_date {
-                    earliest_txn_date = txn.date;
-                }
 
                 let (split_id, split_amt) =
                     update_by_splitting_txn(&txn, &lm_creditor_client, config).await?;
@@ -90,10 +84,6 @@ pub async fn run(
             } else {
                 found_valid_txns = true;
 
-                if txn.date < earliest_txn_date {
-                    earliest_txn_date = txn.date;
-                }
-
                 batch_total = batch_total + txn.amount;
 
                 update_batched_transaction(&txn, &lm_creditor_client, config).await?;
@@ -113,9 +103,7 @@ pub async fn run(
 
     persist::save_batch(
         &Batch {
-            name: batch_label.to_owned(),
-            start_date: earliest_txn_date,
-            end_date: end_date,
+            id: batch_label.to_owned(),
             amount: batch_total,
             transaction_ids: batch_txn_ids,
             reconciliation: None,

@@ -1,8 +1,9 @@
-use crate::lunch_money::model::transaction;
+use crate::lunch_money::model::transaction::{self, TransactionId};
 
 use super::super::model::transaction::Transaction;
 use super::Client;
 
+use anyhow::Result;
 use chrono::NaiveDate;
 use reqwest;
 use serde::Deserialize;
@@ -12,11 +13,8 @@ struct TransactionsResponse {
     transactions: Vec<Transaction>,
 }
 
-pub type GetTransactionResult = Result<Transaction, Box<dyn std::error::Error>>;
-pub type GetTransactionsResult = Result<Vec<Transaction>, Box<dyn std::error::Error>>;
-
 impl Client {
-    pub async fn get_transaction(&self, id: transaction::Id) -> GetTransactionResult {
+    pub async fn get_transaction(&self, id: TransactionId) -> Result<Transaction> {
         let auth_header = format!("Bearer {}", self.auth_token);
 
         let url = format!("https://dev.lunchmoney.app/v1/transactions/{}", id);
@@ -37,8 +35,9 @@ impl Client {
     // requesting a whole date range and filtering.
     pub async fn get_transactions_by_id(
         &self,
-        ids: &Vec<transaction::Id>,
-    ) -> GetTransactionsResult {
+        ids: &Vec<TransactionId>,
+    ) -> Result<Vec<Transaction>> {
+        tracing::debug!("Getting transactions with ids: {:?}", ids);
         let mut txns: Vec<Transaction> = Vec::new();
         for txn_id in ids {
             txns.push(self.get_transaction(*txn_id).await?);
@@ -54,7 +53,13 @@ impl Client {
         &self,
         start_date: NaiveDate,
         end_date: NaiveDate,
-    ) -> GetTransactionsResult {
+    ) -> Result<Vec<Transaction>> {
+        tracing::debug!(
+            "Getting transactions by date: start date: {}, end date: {}",
+            start_date.format("MM/dd/YYYY").to_string(),
+            end_date.format("MM/dd/YYYY").to_string()
+        );
+
         let auth_header = format!("Bearer {}", self.auth_token);
 
         let client = reqwest::Client::new();

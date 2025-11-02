@@ -23,7 +23,7 @@ pub async fn send_email(
     tracing::debug!(
         config.jmap.sending_address,
         config.creditor.email_address,
-        "sending email"
+        "Sending email"
     );
 
     if config::is_dry_run() {

@@ -1,3 +1,4 @@
+use rand::random_bool;
 use rust_decimal::{Decimal, dec};
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -11,8 +12,30 @@ impl USD {
         Self(value.round_dp(2))
     }
 
+    pub fn new_from_cents(cents: i64) -> Self {
+        Self(Decimal::new(cents, 2))
+    }
+
     pub fn value(&self) -> Decimal {
         self.0
+    }
+
+    pub fn random_rounded_even_split(&self) -> (USD, USD) {
+        let half1 = (self.value() / dec!(2))
+            .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::AwayFromZero);
+        let half2 = (self.value() / dec!(2))
+            .round_dp_with_strategy(2, rust_decimal::RoundingStrategy::ToZero);
+        assert_eq!(
+            self.value(),
+            (half1 + half2),
+            "rounded splits not equal to starting total"
+        );
+
+        if random_bool(0.5) {
+            return (USD::new(half1), USD::new(half2));
+        } else {
+            return (USD::new(half2), USD::new(half1));
+        }
     }
 }
 

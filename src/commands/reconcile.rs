@@ -31,7 +31,7 @@ pub async fn reconcile_batch(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let span = tracing::info_span!("Reconcile Batch");
     let _enter = span.enter();
-    tracing::debug!(batch.name, "Starting reconcile batch");
+    tracing::debug!(batch.id, "Starting");
 
     let lm_creditor_client = crate::lunch_money::api::Client {
         auth_token: config.creditor.api_key.to_owned(),
@@ -43,8 +43,14 @@ pub async fn reconcile_batch(
 
     // Find creditor's reconciliation txn
     // Transaction must have occurred between the last txn in the batch and the current date
+    let latest_txn_date = creditor_batch_txns
+        .iter()
+        .map(|txn| txn.date)
+        .reduce(|acc, date| if date > acc { date } else { acc })
+        .ok_or("no transactions found")?;
+
     let creditor_new_txns = lm_creditor_client
-        .get_transactions(batch.end_date, date_helpers::now_date_naive_eastern())
+        .get_transactions(latest_txn_date, date_helpers::now_date_naive_eastern())
         .await?;
 
     let creditor_reconciliation_txn = creditor_new_txns
@@ -63,7 +69,7 @@ pub async fn reconcile_batch(
     let repayment_txn_update = TransactionUpdate {
         payee: None,
         category_id: Some(config.creditor.proxy_category_id),
-        notes: Some(batch.name.to_owned()),
+        notes: Some(batch.id.to_owned()),
         tags: None,
         status: Some(TransactionStatus::Cleared),
     };
@@ -78,7 +84,7 @@ pub async fn reconcile_batch(
     // Get txns for the debtor that have happened between the batch creation and now
     // The repayment txn can't have happened before the last txn in the batch
     let debtor_txns = lm_debtor_client
-        .get_transactions(batch.end_date, date_helpers::now_date_naive_eastern())
+        .get_transactions(latest_txn_date, date_helpers::now_date_naive_eastern())
         .await?;
 
     let debtor_repayment_txn = debtor_txns
@@ -99,7 +105,7 @@ pub async fn reconcile_batch(
     let debtor_txn_update = TransactionUpdate {
         payee: None,
         category_id: None,
-        notes: Some(batch.name.to_owned()),
+        notes: Some(batch.id.to_owned()),
         tags: None,
         status: None,
     };
@@ -109,9 +115,7 @@ pub async fn reconcile_batch(
         .await?;
 
     let updated_batch = Batch {
-        name: batch.name,
-        start_date: batch.start_date,
-        end_date: batch.end_date,
+        id: batch.id,
         amount: batch.amount,
         transaction_ids: batch.transaction_ids,
         reconciliation: Some(Reconciliation {
@@ -122,7 +126,7 @@ pub async fn reconcile_batch(
 
     persist::save_batch(&updated_batch, profile)?;
 
-    tracing::info!(updated_batch.name, "Finished reconcile batch");
+    tracing::info!(updated_batch.id, "Finished reconcile batch");
 
     return Ok(());
 }
