@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::lunch_money::api::update_transaction::{Split, TransactionUpdate};
+use crate::lunch_money::api::update_transaction::{SplitUpdateItem, TransactionUpdate};
 use crate::lunch_money::model::transaction::*;
 use crate::persist::{Batch, Reconciliation};
 use crate::{date_helpers, persist};
@@ -74,7 +74,7 @@ pub async fn reconcile_batch(
         status: Some(TransactionStatus::Cleared),
     };
     lm_creditor_client
-        .update_txn_only(creditor_reconciliation_txn.id, &repayment_txn_update)
+        .update_txn2(creditor_reconciliation_txn.id, repayment_txn_update)
         .await?;
 
     let lm_debtor_client = crate::lunch_money::api::Client {
@@ -100,7 +100,7 @@ pub async fn reconcile_batch(
         .to_owned()
         .to_owned();
 
-    let debtor_splits: Vec<Split> = create_debtor_splits(&creditor_batch_txns);
+    let debtor_splits: Vec<SplitUpdateItem> = create_debtor_splits(&creditor_batch_txns);
 
     let debtor_txn_update = TransactionUpdate {
         payee: None,
@@ -111,7 +111,7 @@ pub async fn reconcile_batch(
     };
 
     lm_debtor_client
-        .update_txn_and_split(debtor_repayment_txn.id, &debtor_txn_update, &debtor_splits)
+        .update_txn_and_split2(debtor_repayment_txn.id, debtor_txn_update, debtor_splits)
         .await?;
 
     let updated_batch = Batch {
@@ -132,11 +132,11 @@ pub async fn reconcile_batch(
 }
 
 // pass through the payees and notes so they can have info to categorize
-fn create_debtor_splits(creditor_proxy_txns: &Vec<Transaction>) -> Vec<Split> {
+fn create_debtor_splits(creditor_proxy_txns: &Vec<Transaction>) -> Vec<SplitUpdateItem> {
     creditor_proxy_txns
         .iter()
         .map({
-            |t| Split {
+            |t| SplitUpdateItem {
                 amount: t.amount,
                 payee: Some(t.payee.to_owned()),
                 category_id: None,

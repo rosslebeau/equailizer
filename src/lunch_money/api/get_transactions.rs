@@ -1,4 +1,4 @@
-use crate::lunch_money::model::transaction::{self, TransactionId};
+use crate::lunch_money::model::transaction::TransactionId;
 
 use super::super::model::transaction::Transaction;
 use super::Client;

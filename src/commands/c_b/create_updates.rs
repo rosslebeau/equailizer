@@ -1,61 +1,60 @@
 use crate::{
     commands::c_b::process_tags::ProcessTagsOutput,
     lunch_money::{
-        api::update_transaction::{Action, Split, TransactionUpdate},
+        api::update_transaction::{SplitUpdateItem, TransactionAndSplitUpdate, TransactionUpdate},
         model::transaction::{Tag, Transaction, TransactionStatus},
     },
     usd::USD,
 };
 
-pub fn create_actions(processed_data: ProcessTagsOutput, proxy_category_id: u32) -> Vec<Action> {
-    let add_actions: Vec<Action> = create_add_actions(
+pub fn create_updates(
+    processed_data: ProcessTagsOutput,
+    proxy_category_id: u32,
+) -> (Vec<TransactionUpdate>, Vec<TransactionAndSplitUpdate>) {
+    let add_updates: Vec<TransactionUpdate> = create_add_updates(
         processed_data.txns_to_add,
         proxy_category_id,
         processed_data.add_tag,
     );
 
-    let mut split_actions: Vec<Action> = create_split_actions(
+    let mut split_updates: Vec<TransactionAndSplitUpdate> = create_split_updates(
         processed_data.txns_to_split,
         proxy_category_id,
         processed_data.split_tag,
     );
 
-    let mut actions = add_actions;
-    actions.append(&mut split_actions);
-    return actions;
+    return (add_updates, split_updates);
 }
 
-fn create_add_actions(
+fn create_add_updates(
     txns_to_add: Vec<Transaction>,
     proxy_category_id: u32,
     add_tag: String,
-) -> Vec<Action> {
+) -> Vec<TransactionUpdate> {
     txns_to_add
         .into_iter()
-        .map(|txn| {
-            Action::Update(TransactionUpdate {
-                payee: None,
-                category_id: Some(proxy_category_id),
-                notes: None,
-                tags: Some(tag_names_removing(txn.tags, &add_tag)),
-                status: Some(TransactionStatus::Cleared),
-            })
+        .map(|txn| TransactionUpdate {
+            payee: None,
+            category_id: Some(proxy_category_id),
+            notes: None,
+            tags: Some(tag_names_removing(txn.tags, &add_tag)),
+            status: Some(TransactionStatus::Cleared),
         })
         .collect()
 }
 
-fn create_split_actions(
+fn create_split_updates(
     txns_to_split: Vec<Transaction>,
     proxy_category_id: u32,
     split_tag: String,
-) -> Vec<Action> {
+) -> Vec<TransactionAndSplitUpdate> {
     txns_to_split
         .into_iter()
         .map(|txn| {
             let (creditor_amt, debtor_amt) = txn.amount.random_rounded_even_split();
             let (creditor_split, debtor_split) =
                 create_splits(creditor_amt, debtor_amt, proxy_category_id);
-            Action::UpdateAndSplit(
+            return (
                 TransactionUpdate {
                     payee: None,
                     category_id: None,
@@ -64,13 +63,17 @@ fn create_split_actions(
                     status: Some(TransactionStatus::Cleared),
                 },
                 vec![creditor_split, debtor_split],
-            )
+            );
         })
         .collect()
 }
 
-fn create_splits(creditor_amt: USD, debtor_amt: USD, proxy_category: u32) -> (Split, Split) {
-    let creditor_split = Split {
+fn create_splits(
+    creditor_amt: USD,
+    debtor_amt: USD,
+    proxy_category: u32,
+) -> (SplitUpdateItem, SplitUpdateItem) {
+    let creditor_split = SplitUpdateItem {
         amount: creditor_amt,
         payee: None,
         category_id: None,
@@ -78,7 +81,7 @@ fn create_splits(creditor_amt: USD, debtor_amt: USD, proxy_category: u32) -> (Sp
         date: None,
     };
 
-    let debtor_split = Split {
+    let debtor_split = SplitUpdateItem {
         amount: debtor_amt,
         payee: None,
         category_id: Some(proxy_category),
@@ -196,7 +199,7 @@ mod tests {
         };
 
         let proxy_category_id = 20;
-        let actions = super::create_actions(
+        let (add_updates, split_updates) = super::create_updates(
             ProcessTagsOutput {
                 add_tag: add_tag,
                 split_tag: split_tag,
@@ -207,22 +210,25 @@ mod tests {
             proxy_category_id,
         );
 
-        let assert_actions = vec![
-            Action::Update(TransactionUpdate {
+        let assert_add_updates = vec![
+            TransactionUpdate {
                 payee: None,
                 category_id: Some(proxy_category_id),
                 notes: None,
                 tags: Some(vec![]),
                 status: Some(TransactionStatus::Cleared),
-            }),
-            Action::Update(TransactionUpdate {
+            },
+            TransactionUpdate {
                 payee: None,
                 category_id: Some(proxy_category_id),
                 notes: None,
                 tags: Some(vec!["external-tag".to_string()]),
                 status: Some(TransactionStatus::Cleared),
-            }),
-            Action::UpdateAndSplit(
+            },
+        ];
+
+        let assert_split_updates = vec![
+            (
                 TransactionUpdate {
                     payee: None,
                     category_id: None,
@@ -231,14 +237,14 @@ mod tests {
                     status: Some(TransactionStatus::Cleared),
                 },
                 vec![
-                    Split {
+                    SplitUpdateItem {
                         amount: USD::new_from_cents(750),
                         payee: None,
                         category_id: None,
                         notes: None,
                         date: None,
                     },
-                    Split {
+                    SplitUpdateItem {
                         amount: USD::new_from_cents(750),
                         payee: None,
                         category_id: Some(proxy_category_id),
@@ -247,7 +253,7 @@ mod tests {
                     },
                 ],
             ),
-            Action::UpdateAndSplit(
+            (
                 TransactionUpdate {
                     payee: None,
                     category_id: None,
@@ -256,14 +262,14 @@ mod tests {
                     status: Some(TransactionStatus::Cleared),
                 },
                 vec![
-                    Split {
+                    SplitUpdateItem {
                         amount: USD::new_from_cents(600),
                         payee: None,
                         category_id: None,
                         notes: None,
                         date: None,
                     },
-                    Split {
+                    SplitUpdateItem {
                         amount: USD::new_from_cents(600),
                         payee: None,
                         category_id: Some(proxy_category_id),
@@ -274,6 +280,7 @@ mod tests {
             ),
         ];
 
-        assert_eq!(actions, assert_actions);
+        assert_eq!(add_updates, assert_add_updates);
+        assert_eq!(split_updates, assert_split_updates);
     }
 }
