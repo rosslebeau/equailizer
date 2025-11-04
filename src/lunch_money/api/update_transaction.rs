@@ -6,8 +6,10 @@ use chrono::NaiveDate;
 use display_json::DebugAsJson;
 use serde::{Deserialize, Serialize};
 
+pub type TransactionUpdate = (TransactionId, TransactionUpdateItem);
+
 #[derive(Debug, Serialize, PartialEq)]
-pub struct TransactionUpdate {
+pub struct TransactionUpdateItem {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub payee: Option<String>,
 
@@ -24,7 +26,7 @@ pub struct TransactionUpdate {
     pub status: Option<TransactionStatus>,
 }
 
-pub type SplitUpdate = Vec<SplitUpdateItem>;
+pub type SplitUpdate = (TransactionId, Vec<SplitUpdateItem>);
 
 #[derive(Debug, Serialize, PartialEq)]
 pub struct SplitUpdateItem {
@@ -43,13 +45,13 @@ pub struct SplitUpdateItem {
     pub date: Option<NaiveDate>,
 }
 
-pub type TransactionAndSplitUpdate = (TransactionUpdate, SplitUpdate);
+pub type TransactionAndSplitUpdate = (TransactionId, TransactionUpdateItem, Vec<SplitUpdateItem>);
 
 #[derive(Debug)]
 enum Action {
-    Update(TransactionUpdate),
+    Update(TransactionUpdateItem),
     Split(Vec<SplitUpdateItem>),
-    UpdateAndSplit(TransactionUpdate, Vec<SplitUpdateItem>),
+    UpdateAndSplit(TransactionUpdateItem, Vec<SplitUpdateItem>),
 }
 
 pub struct SplitResponse {
@@ -59,31 +61,28 @@ pub struct SplitResponse {
 impl Client {
     pub async fn update_txn2(
         &self,
-        txn_id: TransactionId,
         txn_update: TransactionUpdate,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        self.update2(txn_id, Action::Update(txn_update)).await?;
+        self.update2(txn_update.0, Action::Update(txn_update.1))
+            .await?;
         Ok(())
     }
 
     #[allow(dead_code)]
     pub async fn update_split2(
         &self,
-        txn_id: TransactionId,
-        splits: Vec<SplitUpdateItem>,
+        update: SplitUpdate,
     ) -> Result<SplitResponse, Box<dyn std::error::Error>> {
-        self.update2(txn_id, Action::Split(splits))
+        self.update2(update.0, Action::Split(update.1))
             .await?
             .ok_or("no split ids found in transaction update that contained splits".into())
     }
 
     pub async fn update_txn_and_split2(
         &self,
-        txn_id: TransactionId,
-        txn_update: TransactionUpdate,
-        splits: Vec<SplitUpdateItem>,
+        update: TransactionAndSplitUpdate,
     ) -> Result<SplitResponse, Box<dyn std::error::Error>> {
-        self.update2(txn_id, Action::UpdateAndSplit(txn_update, splits))
+        self.update2(update.0, Action::UpdateAndSplit(update.1, update.2))
             .await?
             .ok_or("no split ids found in transaction update that contained splits".into())
     }
@@ -117,7 +116,7 @@ impl Client {
         #[derive(DebugAsJson, Serialize)]
         struct RequestBodySource<'a> {
             #[serde(skip_serializing_if = "Option::is_none")]
-            transaction: Option<&'a TransactionUpdate>,
+            transaction: Option<&'a TransactionUpdateItem>,
 
             #[serde(skip_serializing_if = "Option::is_none")]
             split: Option<&'a Vec<SplitUpdateItem>>,

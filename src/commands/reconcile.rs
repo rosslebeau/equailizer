@@ -1,10 +1,13 @@
-use crate::config::Config;
-use crate::lunch_money::api::update_transaction::{SplitUpdateItem, TransactionUpdate};
-use crate::lunch_money::model::transaction::*;
-use crate::persist::{Batch, Reconciliation};
-use crate::{date_helpers, persist};
+use crate::{
+    config::{self, Config},
+    date_helpers,
+    lunch_money::{
+        api::update_transaction::{SplitUpdateItem, TransactionUpdateItem},
+        model::transaction::{Transaction, TransactionStatus},
+    },
+    persist::{self, Batch},
+};
 
-// On success, returns a list of reconciled batch names
 pub async fn reconcile_all(
     config: &Config,
     profile: &String,
@@ -24,7 +27,7 @@ pub async fn reconcile_batch_name(
     reconcile_batch(persist::get_batch(batch_name, profile)?, config, profile).await
 }
 
-pub async fn reconcile_batch(
+async fn reconcile_batch(
     batch: Batch,
     config: &Config,
     profile: &String,
@@ -33,27 +36,31 @@ pub async fn reconcile_batch(
     let _enter = span.enter();
     tracing::debug!(batch.id, "Starting");
 
-    let lm_creditor_client = crate::lunch_money::api::Client {
+    let creditor_client = crate::lunch_money::api::Client {
         auth_token: config.creditor.api_key.to_owned(),
     };
+    let debtor_client = crate::lunch_money::api::Client {
+        auth_token: config.debtor.api_key.to_owned(),
+    };
 
-    let creditor_batch_txns = lm_creditor_client
+    let batch_txns = creditor_client
         .get_transactions_by_id(&batch.transaction_ids)
         .await?;
 
-    // Find creditor's reconciliation txn
-    // Transaction must have occurred between the last txn in the batch and the current date
-    let latest_txn_date = creditor_batch_txns
+    // Now that we have the batched transactions, we need to find the
+    // settlement transactions (settlement credit/debit).
+    //
+    // In order to find these, we should look through all of the
+    // transactions that have happened since the last item in the batch.
+    let last_txn_date = batch_txns
         .iter()
         .map(|txn| txn.date)
         .reduce(|acc, date| if date > acc { date } else { acc })
-        .ok_or("no transactions found")?;
+        .ok_or("no creditor transactions while trying to reconcile")?;
 
-    let creditor_new_txns = lm_creditor_client
-        .get_transactions(latest_txn_date, date_helpers::now_date_naive_eastern())
-        .await?;
-
-    let creditor_reconciliation_txn = creditor_new_txns
+    let settlement_credit = creditor_client
+        .get_transactions(last_txn_date, date_helpers::now_date_naive_eastern())
+        .await?
         .iter()
         .filter(|t| {
             t.amount == -batch.amount
@@ -62,32 +69,13 @@ pub async fn reconcile_batch(
         })
         .collect::<Vec<&Transaction>>()
         .first()
-        .ok_or("did not find suitable creditor reconciliation transaction")?
+        .ok_or("did not find suitable settlement credit")?
         .to_owned()
         .to_owned();
 
-    let repayment_txn_update = TransactionUpdate {
-        payee: None,
-        category_id: Some(config.creditor.proxy_category_id),
-        notes: Some(batch.id.to_owned()),
-        tags: None,
-        status: Some(TransactionStatus::Cleared),
-    };
-    lm_creditor_client
-        .update_txn2(creditor_reconciliation_txn.id, repayment_txn_update)
-        .await?;
-
-    let lm_debtor_client = crate::lunch_money::api::Client {
-        auth_token: config.debtor.api_key.to_owned(),
-    };
-
-    // Get txns for the debtor that have happened between the batch creation and now
-    // The repayment txn can't have happened before the last txn in the batch
-    let debtor_txns = lm_debtor_client
-        .get_transactions(latest_txn_date, date_helpers::now_date_naive_eastern())
-        .await?;
-
-    let debtor_repayment_txn = debtor_txns
+    let settlement_debit = debtor_client
+        .get_transactions(last_txn_date, date_helpers::now_date_naive_eastern())
+        .await?
         .iter()
         .filter(|t| {
             t.amount == batch.amount
@@ -96,59 +84,50 @@ pub async fn reconcile_batch(
         })
         .collect::<Vec<&Transaction>>()
         .first()
-        .ok_or("no suitable debtor reconciliation transaction found")?
+        .ok_or("did not find suitable settlement debit")?
         .to_owned()
         .to_owned();
 
-    let debtor_splits: Vec<SplitUpdateItem> = create_debtor_splits(&creditor_batch_txns);
+    // Split out the creditor's side to match the transactions in the batch
+    // so there are side-by-side debits and credits for each item.
+    let creditor_splits: Vec<SplitUpdateItem> = batch_txns
+        .iter()
+        .map({
+            |t| SplitUpdateItem {
+                amount: t.amount,
+                payee: Some(config.debtor.name.clone()),
+                category_id: Some(config.creditor.proxy_category_id),
+                notes: Some("equailizer".to_string()),
+                date: Some(t.date),
+            }
+        })
+        .collect();
 
-    let debtor_txn_update = TransactionUpdate {
-        payee: None,
-        category_id: None,
-        notes: Some(batch.id.to_owned()),
-        tags: None,
-        status: None,
-    };
-
-    lm_debtor_client
-        .update_txn_and_split2(debtor_repayment_txn.id, debtor_txn_update, debtor_splits)
+    creditor_client
+        .update_split2((settlement_credit.id, creditor_splits))
         .await?;
 
-    let updated_batch = Batch {
-        id: batch.id,
-        amount: batch.amount,
-        transaction_ids: batch.transaction_ids,
-        reconciliation: Some(Reconciliation {
-            creditor_repayment_transaction_id: creditor_reconciliation_txn.id,
-            debtor_repayment_transaction_id: debtor_repayment_txn.id,
-        }),
-    };
-
-    persist::save_batch(&updated_batch, profile)?;
-
-    tracing::info!(updated_batch.id, "Finished reconcile batch");
-
-    return Ok(());
-}
-
-// pass through the payees and notes so they can have info to categorize
-fn create_debtor_splits(creditor_proxy_txns: &Vec<Transaction>) -> Vec<SplitUpdateItem> {
-    creditor_proxy_txns
+    // Split out the debtor's side to match the transactions in the batch.
+    // Use this opportunity to pass through the payee and notes for the
+    // debtor to use when they categorize these.
+    let debtor_splits: Vec<SplitUpdateItem> = batch_txns
         .iter()
         .map({
             |t| SplitUpdateItem {
                 amount: t.amount,
                 payee: Some(t.payee.to_owned()),
                 category_id: None,
-                notes: Some(
-                    t.notes
-                        .to_owned()
-                        .map_or("Paid via equailizer".to_string(), |notes| {
-                            format!("Paid via equailizer. Notes: {:?}", notes)
-                        }),
-                ),
+                notes: t.notes.clone(),
                 date: Some(t.date),
             }
         })
-        .collect()
+        .collect();
+
+    debtor_client
+        .update_split2((settlement_debit.id, debtor_splits))
+        .await?;
+
+    // save batch so we know it's reconciled
+
+    Ok(())
 }

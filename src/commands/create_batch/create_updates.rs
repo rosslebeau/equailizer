@@ -1,7 +1,9 @@
 use crate::{
-    commands::c_b::process_tags::ProcessTagsOutput,
+    commands::create_batch::process_tags::ProcessTagsOutput,
     lunch_money::{
-        api::update_transaction::{SplitUpdateItem, TransactionAndSplitUpdate, TransactionUpdate},
+        api::update_transaction::{
+            SplitUpdateItem, TransactionAndSplitUpdate, TransactionUpdate, TransactionUpdateItem,
+        },
         model::transaction::{Tag, Transaction, TransactionStatus},
     },
     usd::USD,
@@ -17,7 +19,7 @@ pub fn create_updates(
         processed_data.add_tag,
     );
 
-    let mut split_updates: Vec<TransactionAndSplitUpdate> = create_split_updates(
+    let split_updates: Vec<TransactionAndSplitUpdate> = create_split_updates(
         processed_data.txns_to_split,
         proxy_category_id,
         processed_data.split_tag,
@@ -33,12 +35,17 @@ fn create_add_updates(
 ) -> Vec<TransactionUpdate> {
     txns_to_add
         .into_iter()
-        .map(|txn| TransactionUpdate {
-            payee: None,
-            category_id: Some(proxy_category_id),
-            notes: None,
-            tags: Some(tag_names_removing(txn.tags, &add_tag)),
-            status: Some(TransactionStatus::Cleared),
+        .map(|txn| {
+            (
+                txn.id,
+                TransactionUpdateItem {
+                    payee: None,
+                    category_id: Some(proxy_category_id),
+                    notes: None,
+                    tags: Some(tag_names_removing(txn.tags, &add_tag)),
+                    status: Some(TransactionStatus::Cleared),
+                },
+            )
         })
         .collect()
 }
@@ -55,7 +62,8 @@ fn create_split_updates(
             let (creditor_split, debtor_split) =
                 create_splits(creditor_amt, debtor_amt, proxy_category_id);
             return (
-                TransactionUpdate {
+                txn.id,
+                TransactionUpdateItem {
                     payee: None,
                     category_id: None,
                     notes: None,
@@ -211,25 +219,32 @@ mod tests {
         );
 
         let assert_add_updates = vec![
-            TransactionUpdate {
-                payee: None,
-                category_id: Some(proxy_category_id),
-                notes: None,
-                tags: Some(vec![]),
-                status: Some(TransactionStatus::Cleared),
-            },
-            TransactionUpdate {
-                payee: None,
-                category_id: Some(proxy_category_id),
-                notes: None,
-                tags: Some(vec!["external-tag".to_string()]),
-                status: Some(TransactionStatus::Cleared),
-            },
+            (
+                1024,
+                TransactionUpdateItem {
+                    payee: None,
+                    category_id: Some(proxy_category_id),
+                    notes: None,
+                    tags: Some(vec![]),
+                    status: Some(TransactionStatus::Cleared),
+                },
+            ),
+            (
+                1025,
+                TransactionUpdateItem {
+                    payee: None,
+                    category_id: Some(proxy_category_id),
+                    notes: None,
+                    tags: Some(vec!["external-tag".to_string()]),
+                    status: Some(TransactionStatus::Cleared),
+                },
+            ),
         ];
 
         let assert_split_updates = vec![
             (
-                TransactionUpdate {
+                1026,
+                TransactionUpdateItem {
                     payee: None,
                     category_id: None,
                     notes: None,
@@ -254,7 +269,8 @@ mod tests {
                 ],
             ),
             (
-                TransactionUpdate {
+                1027,
+                TransactionUpdateItem {
                     payee: None,
                     category_id: None,
                     notes: None,

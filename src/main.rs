@@ -10,7 +10,7 @@ mod lunch_money;
 mod persist;
 pub mod usd;
 
-use crate::{commands::c_b, usd::USD};
+use crate::{commands::create_batch, usd::USD};
 use chrono::NaiveDate;
 use clap::Parser;
 use rust_decimal::dec;
@@ -72,9 +72,7 @@ async fn handle_create_batch(
     let config = config::read_config(&profile)?;
     let start_date = cli::start_date_from_args(start);
     let end_date = end_date.or_naive_date_now();
-    // commands::create_batch::run(start_date, end_date, &config, &profile).await?;
-    // commands::create_batch2::create_batch(start_date, end_date, &profile, &config).await?;
-    commands::c_b::create_batch(start_date, end_date, &profile, &config).await?;
+    commands::create_batch::create_batch(start_date, end_date, &profile, &config).await?;
     return Ok(());
 }
 

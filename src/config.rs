@@ -48,6 +48,7 @@ pub struct Creditor {
 #[derive(Debug, Deserialize)]
 pub struct Debtor {
     pub api_key: String,
+    pub name: String,
     pub repayment_account_id: u32,
     pub venmo_username: String,
 }
