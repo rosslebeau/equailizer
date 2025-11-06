@@ -18,6 +18,7 @@ pub async fn send_email(
     batch_id: &String,
     amount: &USD,
     txns: Vec<Txn>,
+    warnings: Vec<String>,
     config: &Config,
 ) -> Result<(), Box<dyn std::error::Error>> {
     tracing::debug!(
@@ -90,7 +91,7 @@ pub async fn send_email(
     email.text_body(text_body_id);
 
     let html_body_id = EmailBodyPart::new().part_id("t2");
-    let html_text = make_html_string(txns, venmo_request_link);
+    let html_text = make_html_string(txns, venmo_request_link, warnings);
     email.body_value("t2".to_string(), html_text);
     email.html_body(html_body_id);
 
@@ -133,9 +134,14 @@ fn venmo_request_link(venmo_username: &String, text: &String, amount: &USD) -> S
 struct BatchReadyEmailTemplate {
     txns_by_date: HashMap<String, Vec<Txn>>,
     venmo_request_link: String,
+    warnings: Vec<String>,
 }
 
-pub fn make_html_string(txns: Vec<Txn>, venmo_request_link: String) -> String {
+pub fn make_html_string(
+    txns: Vec<Txn>,
+    venmo_request_link: String,
+    warnings: Vec<String>,
+) -> String {
     let txns_by_date: HashMap<String, Vec<Txn>> =
         txns.into_iter()
             .fold(HashMap::<String, Vec<Txn>>::new(), |mut acc, txn| {
@@ -148,7 +154,39 @@ pub fn make_html_string(txns: Vec<Txn>, venmo_request_link: String) -> String {
     let email = BatchReadyEmailTemplate {
         txns_by_date: txns_by_date,
         venmo_request_link: venmo_request_link,
+        warnings: warnings,
     };
 
     return email.render().unwrap();
+}
+
+#[cfg(debug_assertions)]
+pub fn dev_print(batch_id: &String, txns: Vec<Txn>, warnings: Vec<String>) {
+    use std::fs;
+
+    let mut path = std::env::current_exe()
+        .expect("no current exe??")
+        .parent()
+        .expect("couldn't open exe's path")
+        .to_path_buf();
+
+    if cfg!(debug_assertions) {
+        path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    }
+
+    path.push("dev");
+
+    if !path.is_dir() {
+        if path.exists() {
+            panic!("cannot create or open data directory - non-directory file exists at this path");
+        } else {
+            fs::create_dir_all(path.as_path()).expect("failed to make dev path");
+        }
+    }
+
+    let file_path = path.join("email.html");
+
+    let html = make_html_string(txns, "https://www.example.com".to_string(), warnings);
+
+    fs::write(file_path, html);
 }

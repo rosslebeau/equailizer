@@ -10,10 +10,16 @@ mod lunch_money;
 mod persist;
 pub mod usd;
 
-use crate::{commands::create_batch, usd::USD};
+use crate::{
+    commands::create_batch,
+    config::Config,
+    lunch_money::model::transaction::{Transaction, TransactionStatus},
+    usd::USD,
+};
 use chrono::NaiveDate;
 use clap::Parser;
 use rust_decimal::dec;
+use uuid::Uuid;
 
 use crate::{cli::StartArgs, email::Txn};
 use core::result::Result;
@@ -52,6 +58,11 @@ async fn main() {
                 Ok(_) => tracing::info!("Finished reconcile-all command successfully"),
                 Err(e) => tracing::error!(e, "reconcile-all failed"),
             }
+        }
+        #[cfg(debug_assertions)]
+        cli::Commands::Dev { email } => {
+            tracing::info!("email command");
+            handle_dev_email();
         }
     }
 
@@ -95,4 +106,38 @@ async fn handle_reconcile_all(
     let config = config::read_config(&profile)?;
     commands::reconcile::reconcile_all(&config, &profile).await?;
     return Ok(());
+}
+
+fn handle_dev_email() {
+    let txns: Vec<Txn> = vec![
+        Txn {
+            payee: "Associated Market".to_string(),
+            amount: USD::new_from_cents(2531),
+            date: NaiveDate::from_ymd_opt(2025, 10, 21).expect("NaiveDate creation failed"),
+        },
+        Txn {
+            payee: "Associated Market".to_string(),
+            amount: USD::new_from_cents(2531),
+            date: NaiveDate::from_ymd_opt(2025, 10, 21).expect("NaiveDate creation failed"),
+        },
+        Txn {
+            payee: "Associated Market".to_string(),
+            amount: USD::new_from_cents(2531),
+            date: NaiveDate::from_ymd_opt(2025, 10, 21).expect("NaiveDate creation failed"),
+        },
+        Txn {
+            payee: "Associated Market".to_string(),
+            amount: USD::new_from_cents(2531),
+            date: NaiveDate::from_ymd_opt(2025, 10, 21).expect("NaiveDate creation failed"),
+        },
+        Txn {
+            payee: "Associated Market".to_string(),
+            amount: USD::new_from_cents(2531),
+            date: NaiveDate::from_ymd_opt(2025, 10, 21).expect("NaiveDate creation failed"),
+        },
+    ];
+
+    let warnings = vec!["Test warning: could not find something".to_string()];
+
+    email::dev_print(&Uuid::new_v4().to_string(), txns, warnings);
 }

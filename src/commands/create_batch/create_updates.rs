@@ -10,28 +10,28 @@ use crate::{
 };
 
 pub fn create_updates(
-    processed_data: ProcessTagsOutput,
+    processed_data: &ProcessTagsOutput,
     proxy_category_id: u32,
 ) -> (Vec<TransactionUpdate>, Vec<TransactionAndSplitUpdate>) {
     let add_updates: Vec<TransactionUpdate> = create_add_updates(
-        processed_data.txns_to_add,
+        &processed_data.txns_to_add,
         proxy_category_id,
-        processed_data.add_tag,
+        &processed_data.add_tag,
     );
 
     let split_updates: Vec<TransactionAndSplitUpdate> = create_split_updates(
-        processed_data.txns_to_split,
+        &processed_data.txns_to_split,
         proxy_category_id,
-        processed_data.split_tag,
+        &processed_data.split_tag,
     );
 
     return (add_updates, split_updates);
 }
 
 fn create_add_updates(
-    txns_to_add: Vec<Transaction>,
+    txns_to_add: &Vec<Transaction>,
     proxy_category_id: u32,
-    add_tag: String,
+    add_tag: &String,
 ) -> Vec<TransactionUpdate> {
     txns_to_add
         .into_iter()
@@ -42,7 +42,7 @@ fn create_add_updates(
                     payee: None,
                     category_id: Some(proxy_category_id),
                     notes: None,
-                    tags: Some(tag_names_removing(txn.tags, &add_tag)),
+                    tags: Some(tag_names_removing(&txn.tags, add_tag)),
                     status: Some(TransactionStatus::Cleared),
                 },
             )
@@ -51,9 +51,9 @@ fn create_add_updates(
 }
 
 fn create_split_updates(
-    txns_to_split: Vec<Transaction>,
+    txns_to_split: &Vec<Transaction>,
     proxy_category_id: u32,
-    split_tag: String,
+    split_tag: &String,
 ) -> Vec<TransactionAndSplitUpdate> {
     txns_to_split
         .into_iter()
@@ -67,7 +67,7 @@ fn create_split_updates(
                     payee: None,
                     category_id: None,
                     notes: None,
-                    tags: Some(tag_names_removing(txn.tags, &split_tag)),
+                    tags: Some(tag_names_removing(&txn.tags, &split_tag)),
                     status: Some(TransactionStatus::Cleared),
                 },
                 vec![creditor_split, debtor_split],
@@ -100,9 +100,9 @@ fn create_splits(
     return (creditor_split, debtor_split);
 }
 
-fn tag_names_removing(tags: Vec<Tag>, name_to_remove: &String) -> Vec<String> {
+fn tag_names_removing(tags: &Vec<Tag>, name_to_remove: &String) -> Vec<String> {
     tags.into_iter()
-        .map(|tag| tag.name)
+        .map(|tag| tag.name.clone())
         .filter(|name| name != name_to_remove)
         .collect()
 }
@@ -208,7 +208,7 @@ mod tests {
 
         let proxy_category_id = 20;
         let (add_updates, split_updates) = super::create_updates(
-            ProcessTagsOutput {
+            &ProcessTagsOutput {
                 add_tag: add_tag,
                 split_tag: split_tag,
                 txns_to_add: vec![add_t1, add_t2],

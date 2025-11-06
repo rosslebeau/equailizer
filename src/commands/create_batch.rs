@@ -4,7 +4,7 @@ mod process_tags;
 use std::collections::HashMap;
 
 use crate::commands::create_batch::create_updates::create_updates;
-use crate::commands::create_batch::process_tags::process_tags;
+use crate::commands::create_batch::process_tags::{Issue, process_tags};
 use crate::config::{self, *};
 use crate::email::{self, Txn};
 use crate::lunch_money::api::update_transaction::TransactionUpdateItem;
@@ -53,7 +53,7 @@ pub async fn create_batch(
 
     // We can create the models used for the email now,
     // but only for transactions we're going to add, not split.
-    // (We don't know the ids or amounts of the splits yet)
+    // (We don't know the ids or amounts of the splits yet).
     let mut added_txns_for_email: Vec<Txn> = processed
         .txns_to_add
         .iter()
@@ -75,10 +75,13 @@ pub async fn create_batch(
             acc
         });
 
-    // create updates for the processed results
-    let (add_updates, split_updates) = create_updates(processed, config.creditor.proxy_category_id);
+    // Create actionable updates for the processed results.
+    let (add_updates, split_updates) =
+        create_updates(&processed, config.creditor.proxy_category_id);
 
-    // execute the updates
+    // Execute the updates. For updates with splits, extract the amount for the
+    // debtor's side (2nd item), and then save the id for that item from the Lunch Money
+    // API response.
     let mut added_batch_txn_ids: Vec<TransactionId> = vec![];
 
     for update in add_updates {
@@ -121,6 +124,7 @@ pub async fn create_batch(
         (post_split_txn_ids, txns_for_email)
     };
 
+    // Clean up the ids and email txn models now that we have all the info we need.
     let batch_txn_ids = {
         added_batch_txn_ids.append(&mut split_ids);
         added_batch_txn_ids
@@ -133,7 +137,7 @@ pub async fn create_batch(
     };
     drop(split_txns_for_email);
 
-    // We can use the Txns we just made for the email to get the total amount of the batch
+    // We can use the Txns we just made for the email to get the total amount of the batch.
     let batch_total_amount: USD = email_txns
         .iter()
         .map(|t| t.amount)
@@ -142,17 +146,43 @@ pub async fn create_batch(
 
     let batch_id = Uuid::new_v4().to_string();
 
-    // Save batch to local data
+    // Save batch to local data.
     let batch: Batch = Batch {
         id: Uuid::new_v4().to_string(),
         amount: batch_total_amount,
         transaction_ids: batch_txn_ids,
         reconciliation: None,
     };
-    persist::save_batch(&batch, profile);
+    persist::save_batch(&batch, profile)?;
 
     // configure/send email
-    email::send_email(&batch_id, &batch_total_amount, email_txns, config).await?;
+    // let issues = processed.issues;
+    let email_warnings: Vec<String> = processed.issues.iter().map(|i| text_for_issue(i)).collect();
+    email::send_email(
+        &batch_id,
+        &batch_total_amount,
+        email_txns,
+        email_warnings,
+        config,
+    )
+    .await?;
 
     return Ok(());
+}
+
+fn text_for_issue(issue: &Issue) -> String {
+    match issue {
+        Issue::AddTagHasChildren(txn) => format!(
+            "Transaction was tagged for batch, but it has children: {}",
+            txn
+        ),
+        Issue::SplitTagHasParent(txn) => format!(
+            "Transaction was tagged to split, but it has a parent: {}",
+            txn
+        ),
+        Issue::SplitTagHasChildren(txn) => format!(
+            "Transaction was tagged to split, but it already has children: {}",
+            txn
+        ),
+    }
 }

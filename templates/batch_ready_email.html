@@ -6,7 +6,7 @@
         <style>
             .btn_venmo {
                 display: inline-block;
-                padding: 10px 20px;
+                padding: 16px 30px;
                 font-size: 14px;
                 color: #ffffff;
                 background-color: #007bff;
@@ -14,7 +14,7 @@
                 border-radius: 6px;
             }
             .days_list_item {
-                padding-top: 14px;
+                padding-top: 20px;
             }
             ul {
                 list-style: none;
@@ -23,12 +23,17 @@
                 padding-left: 0;
             }
             .txns_list {
-                padding-top: 6px;
+                padding-top: 10px;
             }
         </style>
     </head>
     <body>
         <p>New batch ready!</p>
+        <ul class="issues_list">
+            {% for warning in warnings %}
+            <li>&#x26A0 {{ warning }}</li>
+            {% endfor %}
+        </ul>
         <a href="{{ venmo_request_link }}" class="btn_venmo"
             >Request on Venmo
         </a>

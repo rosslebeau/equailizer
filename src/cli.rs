@@ -55,6 +55,11 @@ pub enum Commands {
         #[arg(short, long, action = ArgAction::SetTrue)]
         dry_run: bool,
     },
+    #[cfg(debug_assertions)]
+    Dev {
+        #[arg(required = false, long = "email")]
+        email: bool,
+    },
 }
 
 pub fn start_date_from_args(args: StartArgs) -> NaiveDate {
