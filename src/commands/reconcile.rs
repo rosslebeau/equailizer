@@ -5,7 +5,7 @@ use crate::{
         api::update_transaction::{SplitUpdateItem, TransactionUpdateItem},
         model::transaction::{Transaction, TransactionStatus},
     },
-    persist::{self, Batch},
+    persist::{self, Batch, Settlement},
 };
 
 pub async fn reconcile_all(
@@ -104,7 +104,7 @@ async fn reconcile_batch(
         .collect();
 
     creditor_client
-        .update_split2((settlement_credit.id, creditor_splits))
+        .update_split((settlement_credit.id, creditor_splits))
         .await?;
 
     // Split out the debtor's side to match the transactions in the batch.
@@ -124,10 +124,23 @@ async fn reconcile_batch(
         .collect();
 
     debtor_client
-        .update_split2((settlement_debit.id, debtor_splits))
+        .update_split((settlement_debit.id, debtor_splits))
         .await?;
 
-    // save batch so we know it's reconciled
+    // Save batch so we know it's reconciled and can refer to it
+    // later if we want, from the data persistence.
+    persist::save_batch(
+        &Batch {
+            id: batch.id,
+            amount: batch.amount,
+            transaction_ids: batch.transaction_ids,
+            reconciliation: Some(Settlement {
+                settlement_credit_id: settlement_credit.id,
+                settlement_debit_id: settlement_debit.id,
+            }),
+        },
+        profile,
+    )?;
 
     Ok(())
 }

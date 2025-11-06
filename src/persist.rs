@@ -1,8 +1,4 @@
-use crate::{
-    config,
-    lunch_money::model::transaction::{self, TransactionId},
-    usd::USD,
-};
+use crate::{config, lunch_money::model::transaction::TransactionId, usd::USD};
 use display_json::DebugAsJson;
 use serde::{Deserialize, Serialize};
 use std::{fs, path::PathBuf};
@@ -12,13 +8,13 @@ pub struct Batch {
     pub id: String,
     pub amount: USD,
     pub transaction_ids: Vec<TransactionId>,
-    pub reconciliation: Option<Reconciliation>,
+    pub reconciliation: Option<Settlement>,
 }
 
 #[derive(DebugAsJson, Deserialize, Serialize)]
-pub struct Reconciliation {
-    pub creditor_repayment_transaction_id: TransactionId,
-    pub debtor_repayment_transaction_id: TransactionId,
+pub struct Settlement {
+    pub settlement_credit_id: TransactionId,
+    pub settlement_debit_id: TransactionId,
 }
 
 pub fn base_path() -> Result<PathBuf, Box<dyn std::error::Error>> {

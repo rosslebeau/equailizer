@@ -188,5 +188,5 @@ pub fn dev_print(batch_id: &String, txns: Vec<Txn>, warnings: Vec<String>) {
 
     let html = make_html_string(txns, "https://www.example.com".to_string(), warnings);
 
-    fs::write(file_path, html);
+    fs::write(file_path, html).expect("failed to write html file");
 }

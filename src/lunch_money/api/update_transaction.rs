@@ -59,38 +59,37 @@ pub struct SplitResponse {
 }
 
 impl Client {
-    pub async fn update_txn2(
+    pub async fn update_transaction(
         &self,
         txn_update: TransactionUpdate,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        self.update2(txn_update.0, Action::Update(txn_update.1))
+        self.update(txn_update.0, Action::Update(txn_update.1))
             .await?;
         Ok(())
     }
 
-    #[allow(dead_code)]
-    pub async fn update_split2(
+    pub async fn update_split(
         &self,
         update: SplitUpdate,
     ) -> Result<SplitResponse, Box<dyn std::error::Error>> {
-        self.update2(update.0, Action::Split(update.1))
+        self.update(update.0, Action::Split(update.1))
             .await?
             .ok_or("no split ids found in transaction update that contained splits".into())
     }
 
-    pub async fn update_txn_and_split2(
+    pub async fn update_transaction_and_split(
         &self,
         update: TransactionAndSplitUpdate,
     ) -> Result<SplitResponse, Box<dyn std::error::Error>> {
-        self.update2(update.0, Action::UpdateAndSplit(update.1, update.2))
+        self.update(update.0, Action::UpdateAndSplit(update.1, update.2))
             .await?
             .ok_or("no split ids found in transaction update that contained splits".into())
     }
 
     // TODO: Refactor txn_id into Action
-    // Returns Some(SplitResponse) if a split was performed, otherwise None
-    // This is handled in a type-safe way by the public methods that call into this
-    async fn update2(
+    // Returns Some(SplitResponse) if a split was performed, otherwise None.
+    // This is handled in a type-safe way by the public methods that call into this.
+    async fn update(
         &self,
         txn_id: TransactionId,
         action: Action,

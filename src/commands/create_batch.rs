@@ -86,7 +86,7 @@ pub async fn create_batch(
 
     for update in add_updates {
         added_batch_txn_ids.push(update.0);
-        creditor_client.update_txn2(update).await?;
+        creditor_client.update_transaction(update).await?;
     }
 
     let (mut split_ids, mut split_txns_for_email) = {
@@ -113,7 +113,7 @@ pub async fn create_batch(
             });
 
             let debtor_split_id = *creditor_client
-                .update_txn_and_split2(split_update)
+                .update_transaction_and_split(split_update)
                 .await?
                 .split_ids
                 .get(1)
