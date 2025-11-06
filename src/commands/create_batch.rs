@@ -27,11 +27,15 @@ pub async fn create_batch(
     profile: &String,
     config: &Config,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // get transactions from creditor
+    let span = tracing::info_span!("Create Batch");
+    let _enter = span.enter();
+    tracing::debug!("Starting");
+
     if start_date.cmp(&end_date) == std::cmp::Ordering::Greater {
         return Err("start date cannot be after end date".into());
     }
 
+    // Get all transactions in provided date range.
     let creditor_client = Client {
         auth_token: config.creditor.api_key.to_owned(),
     };
@@ -39,13 +43,15 @@ pub async fn create_batch(
         .get_transactions(start_date, end_date)
         .await?;
 
-    // process tags on retrieved txns
+    // Process tags on the retrieved transactions to see what should be
+    // added to the batch.
     let processed = process_tags(
         txns,
         &config::TAG_BATCH_ADD.to_string(),
         &config::TAG_BATCH_SPLIT.to_string(),
     );
 
+    // Check that we found at least 1 valid transaction.
     if processed.txns_to_add.iter().count() + processed.txns_to_split.iter().count() == 0 {
         tracing::info!("No valid transactions found to create batch from");
         return Ok(());
@@ -144,9 +150,9 @@ pub async fn create_batch(
         .reduce(|acc, t| acc + t)
         .expect("no items in email_txns");
 
+    // Create batch id and save to local data.
     let batch_id = Uuid::new_v4().to_string();
-
-    // Save batch to local data.
+    tracing::debug!(batch_id, "Saving new batch");
     let batch: Batch = Batch {
         id: Uuid::new_v4().to_string(),
         amount: batch_total_amount,
@@ -155,8 +161,7 @@ pub async fn create_batch(
     };
     persist::save_batch(&batch, profile)?;
 
-    // configure/send email
-    // let issues = processed.issues;
+    // Send the batch notification email.
     let email_warnings: Vec<String> = processed.issues.iter().map(|i| text_for_issue(i)).collect();
     email::send_email(
         &batch_id,
@@ -167,7 +172,8 @@ pub async fn create_batch(
     )
     .await?;
 
-    return Ok(());
+    tracing::debug!("Finished");
+    Ok(())
 }
 
 fn text_for_issue(issue: &Issue) -> String {

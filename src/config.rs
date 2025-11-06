@@ -41,7 +41,7 @@ pub struct Config {
 pub struct Creditor {
     pub api_key: String,
     pub proxy_category_id: u32,
-    pub repayment_account_id: u32,
+    pub settlement_account_id: u32,
     pub email_address: String,
 }
 
@@ -49,7 +49,7 @@ pub struct Creditor {
 pub struct Debtor {
     pub api_key: String,
     pub name: String,
-    pub repayment_account_id: u32,
+    pub settlement_account_id: u32,
     pub venmo_username: String,
 }
 

@@ -58,6 +58,9 @@ async fn reconcile_batch(
         .reduce(|acc, date| if date > acc { date } else { acc })
         .ok_or("no creditor transactions while trying to reconcile")?;
 
+    // Scan new transactions from the creditor to look for one that
+    // matches the amount of the batch, and is in the creditor's designated
+    // account for settlements (from config).
     let settlement_credit = creditor_client
         .get_transactions(last_txn_date, date_helpers::now_date_naive_eastern())
         .await?
@@ -65,7 +68,7 @@ async fn reconcile_batch(
         .filter(|t| {
             t.amount == -batch.amount
                 && t.plaid_account_id
-                    .is_some_and(|acct| acct == config.creditor.repayment_account_id)
+                    .is_some_and(|acct| acct == config.creditor.settlement_account_id)
         })
         .collect::<Vec<&Transaction>>()
         .first()
@@ -73,6 +76,9 @@ async fn reconcile_batch(
         .to_owned()
         .to_owned();
 
+    // Scan new transactions from the debtor to look for one that
+    // matches the amount of the batch, and is in the debtor's designated
+    // account for settlements (from config).
     let settlement_debit = debtor_client
         .get_transactions(last_txn_date, date_helpers::now_date_naive_eastern())
         .await?
@@ -80,7 +86,7 @@ async fn reconcile_batch(
         .filter(|t| {
             t.amount == batch.amount
                 && t.plaid_account_id
-                    .is_some_and(|acct| acct == config.debtor.repayment_account_id)
+                    .is_some_and(|acct| acct == config.debtor.settlement_account_id)
         })
         .collect::<Vec<&Transaction>>()
         .first()
@@ -142,5 +148,6 @@ async fn reconcile_batch(
         profile,
     )?;
 
+    tracing::debug!("Finished");
     Ok(())
 }
