@@ -4,10 +4,12 @@ mod process_tags;
 use std::collections::HashMap;
 
 use crate::commands::create_batch::create_updates::create_updates;
-use crate::commands::create_batch::process_tags::{Issue, process_tags};
+use crate::commands::create_batch::process_tags::process_tags;
 use crate::config::{self, *};
 use crate::email::{self, Txn};
-use crate::lunch_money::api::update_transaction::TransactionUpdateItem;
+use crate::lunch_money::api::update_transaction::{
+    TransactionAndSplitUpdate, TransactionUpdate, TransactionUpdateItem,
+};
 use crate::lunch_money::model::transaction;
 use crate::persist::Batch;
 use crate::usd::USD;
@@ -20,6 +22,14 @@ use chrono::NaiveDate;
 use rand::random_bool;
 use rust_decimal::prelude::*;
 use uuid::{self, Uuid};
+
+#[derive(Debug, PartialEq)]
+pub enum Issue {
+    AddTagHasChildren(TransactionId),
+    SplitTagHasParent(TransactionId),
+    SplitTagHasChildren(TransactionId),
+    TransactionUpdateError(TransactionId, String),
+}
 
 pub async fn create_batch(
     start_date: NaiveDate,
@@ -57,123 +67,137 @@ pub async fn create_batch(
         return Ok(());
     }
 
-    // We can create the models used for the email now,
-    // but only for transactions we're going to add, not split.
-    // (We don't know the ids or amounts of the splits yet).
-    let mut added_txns_for_email: Vec<Txn> = processed
-        .txns_to_add
-        .iter()
-        .map(|t| Txn {
-            payee: t.payee.clone(),
-            amount: t.amount,
-            date: t.date,
-        })
-        .collect();
-
-    // Collect the payees of all the transactions we are going to split
-    // so that we can display them in the email later, once we get the
-    // ids and amounts of the splits.
-    let split_txns_payee_and_date_by_id: HashMap<TransactionId, (String, NaiveDate)> = processed
-        .txns_to_split
-        .iter()
-        .fold(HashMap::new(), |mut acc, t| {
-            acc.insert(t.id, (t.payee.clone(), t.date));
-            acc
-        });
-
     // Create actionable updates for the processed results.
-    let (add_updates, split_updates) =
-        create_updates(&processed, config.creditor.proxy_category_id);
+    let (add_updates, split_updates) = create_updates(processed, config.creditor.proxy_category_id);
 
-    // Execute the updates. For updates with splits, extract the amount for the
-    // debtor's side (2nd item), and then save the id for that item from the Lunch Money
-    // API response.
-    let mut added_batch_txn_ids: Vec<TransactionId> = vec![];
+    // Prepare final output data.
+    let mut batched_txn_info: Vec<(TransactionId, Txn)> = vec![];
+    let mut issues: Vec<Issue> = vec![];
 
-    for update in add_updates {
-        added_batch_txn_ids.push(update.0);
-        creditor_client.update_transaction(update).await?;
+    // Execute adds and append results to output.
+    {
+        let (mut added_ids_and_email_txns, mut added_issues) =
+            execute_adds(add_updates, &creditor_client).await;
+        batched_txn_info.append(&mut added_ids_and_email_txns);
+        issues.append(&mut added_issues);
     }
 
-    let (mut split_ids, mut split_txns_for_email) = {
-        let mut post_split_txn_ids: Vec<TransactionId> = vec![];
-        let mut txns_for_email: Vec<Txn> = vec![];
+    // Execute splits and append results to output.
+    {
+        let (mut added_ids_and_email_txns, mut added_issues) =
+            execute_splits(split_updates, &creditor_client).await;
+        batched_txn_info.append(&mut added_ids_and_email_txns);
+        issues.append(&mut added_issues);
+    }
 
-        for split_update in split_updates {
-            let split_update_item = split_update
-                .2
-                .get(1)
-                .expect("split update contained fewer than 2 split items");
-
-            txns_for_email.push(Txn {
-                payee: split_txns_payee_and_date_by_id
-                    .get(&split_update.0)
-                    .expect("unexpected transaction id mismatch while splitting")
-                    .0
-                    .clone(),
-                amount: split_update_item.amount,
-                date: split_txns_payee_and_date_by_id
-                    .get(&split_update.0)
-                    .expect("unexpected transaction id mismatch while splitting")
-                    .1,
-            });
-
-            let debtor_split_id = *creditor_client
-                .update_transaction_and_split(split_update)
-                .await?
-                .split_ids
-                .get(1)
-                .ok_or("no item in position 1 of split ids in transaction update response - expected debtor proxy split id")?;
-            post_split_txn_ids.push(debtor_split_id);
-        }
-
-        (post_split_txn_ids, txns_for_email)
-    };
-
-    // Clean up the ids and email txn models now that we have all the info we need.
-    let batch_txn_ids = {
-        added_batch_txn_ids.append(&mut split_ids);
-        added_batch_txn_ids
-    };
-    drop(split_ids);
-
-    let email_txns = {
-        added_txns_for_email.append(&mut split_txns_for_email);
-        added_txns_for_email
-    };
-    drop(split_txns_for_email);
-
-    // We can use the Txns we just made for the email to get the total amount of the batch.
-    let batch_total_amount: USD = email_txns
-        .iter()
-        .map(|t| t.amount)
-        .reduce(|acc, t| acc + t)
-        .expect("no items in email_txns");
+    // Scoop up all the data from the batched transactions into the relevant formats for output
+    let (batched_ids, email_txns, total_amount): (Vec<TransactionId>, Vec<Txn>, USD) =
+        batched_txn_info.into_iter().fold(
+            (vec![], vec![], USD::new_from_cents(0)),
+            |(mut ids, mut txns, amt), x| {
+                let tot = amt + x.1.amount;
+                ids.push(x.0);
+                txns.push(x.1);
+                return (ids, txns, tot);
+            },
+        );
 
     // Create batch id and save to local data.
     let batch_id = Uuid::new_v4().to_string();
     tracing::debug!(batch_id, "Saving new batch");
     let batch: Batch = Batch {
         id: Uuid::new_v4().to_string(),
-        amount: batch_total_amount,
-        transaction_ids: batch_txn_ids,
+        amount: total_amount,
+        transaction_ids: batched_ids,
         reconciliation: None,
     };
     persist::save_batch(&batch, profile)?;
 
     // Send the batch notification email.
-    let email_warnings: Vec<String> = processed.issues.iter().map(|i| text_for_issue(i)).collect();
-    email::send_email(
-        &batch_id,
-        &batch_total_amount,
-        email_txns,
-        email_warnings,
-        config,
-    )
-    .await?;
+    let email_warnings: Vec<String> = issues.iter().map(|i| text_for_issue(i)).collect();
+    email::send_email(&batch_id, &total_amount, email_txns, email_warnings, config).await?;
 
-    tracing::debug!("Finished");
+    tracing::debug!(amount = ?total_amount, batch_id, "Finished creating batch");
     Ok(())
+}
+
+// Execute adding these transactions to the batch with their associated pre-prepared update.
+// Return info about the added transactions and any issues encountered during the operation.
+async fn execute_adds(
+    txns_and_updates: Vec<(Transaction, TransactionUpdate)>,
+    client: &Client,
+) -> (Vec<(TransactionId, Txn)>, Vec<Issue>) {
+    let mut batched_txn_info: Vec<(TransactionId, Txn)> = vec![];
+    let mut issues: Vec<Issue> = vec![];
+
+    for (txn, update) in txns_and_updates {
+        let result = client.update_transaction(update).await;
+        match result {
+            Ok(_) => {
+                batched_txn_info.push((
+                    txn.id,
+                    Txn {
+                        payee: txn.payee,
+                        amount: txn.amount,
+                        date: txn.date,
+                    },
+                ));
+            }
+            Err(e) => {
+                issues.push(Issue::TransactionUpdateError(txn.id, e.to_string()));
+            }
+        }
+    }
+
+    return (batched_txn_info, issues);
+}
+
+// Execute splitting and adding these transactions to the batch with their associated pre-prepared update.
+// Return info about the added transactions and any issues encountered during the operation.
+// Returns info about the transactions added to the batch - i.e. after splitting,
+// return the debtor's split txn info
+async fn execute_splits(
+    txns_and_updates: Vec<(Transaction, TransactionAndSplitUpdate)>,
+    client: &Client,
+) -> (Vec<(TransactionId, Txn)>, Vec<Issue>) {
+    let mut batched_txn_info: Vec<(TransactionId, Txn)> = vec![];
+    let mut issues: Vec<Issue> = vec![];
+
+    for (txn, update) in txns_and_updates {
+        // Grab amount out of update before consuming it during execution
+        let split_amount = update
+            .2
+            .get(1)
+            .expect("split update contained fewer than 2 split items")
+            .amount;
+
+        let result = client.update_transaction_and_split(update).await;
+
+        match result {
+            Ok(split_response) => {
+                match split_response.split_ids.get(1).ok_or("no item in position 1 of split ids in transaction update response - expected debtor proxy split id") {
+                    Ok(batched_id) => {
+                        batched_txn_info.push((
+                            *batched_id,
+                            Txn {
+                                payee: txn.payee,
+                                amount: split_amount,
+                                date: txn.date,
+                            },
+                        ));
+                    }
+                    Err(e) => {
+                        issues.push(Issue::TransactionUpdateError(txn.id, e.to_string()));
+                    }
+                }
+            }
+            Err(e) => {
+                issues.push(Issue::TransactionUpdateError(txn.id, e.to_string()));
+            }
+        }
+    }
+
+    return (batched_txn_info, issues);
 }
 
 fn text_for_issue(issue: &Issue) -> String {
@@ -190,5 +214,25 @@ fn text_for_issue(issue: &Issue) -> String {
             "Transaction was tagged to split, but it already has children: {}",
             txn
         ),
+        Issue::TransactionUpdateError(txn, e_str) => {
+            format!("Error when updating transaction {}: {}", txn, e_str)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::NaiveDate;
+
+    use super::*;
+
+    #[test]
+    fn test_execute_adds() {
+        // Need a way to inject a test Client to test execute_adds
+    }
+
+    #[test]
+    fn test_execute_splits() {
+        // Need a way to inject a test Client to test execute_splits
     }
 }

@@ -1,4 +1,7 @@
-use crate::lunch_money::model::transaction::{Transaction, TransactionId};
+use crate::{
+    commands::create_batch::Issue,
+    lunch_money::model::transaction::{Transaction, TransactionId},
+};
 
 #[derive(Debug, PartialEq)]
 pub struct ProcessTagsOutput {
@@ -7,13 +10,6 @@ pub struct ProcessTagsOutput {
     pub txns_to_add: Vec<Transaction>,
     pub txns_to_split: Vec<Transaction>,
     pub issues: Vec<Issue>,
-}
-
-#[derive(Debug, PartialEq)]
-pub enum Issue {
-    AddTagHasChildren(TransactionId),
-    SplitTagHasParent(TransactionId),
-    SplitTagHasChildren(TransactionId),
 }
 
 pub fn process_tags(

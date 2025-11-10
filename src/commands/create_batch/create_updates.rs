@@ -10,17 +10,20 @@ use crate::{
 };
 
 pub fn create_updates(
-    processed_data: &ProcessTagsOutput,
+    processed_data: ProcessTagsOutput,
     proxy_category_id: u32,
-) -> (Vec<TransactionUpdate>, Vec<TransactionAndSplitUpdate>) {
-    let add_updates: Vec<TransactionUpdate> = create_add_updates(
-        &processed_data.txns_to_add,
+) -> (
+    Vec<(Transaction, TransactionUpdate)>,
+    Vec<(Transaction, TransactionAndSplitUpdate)>,
+) {
+    let add_updates: Vec<(Transaction, TransactionUpdate)> = create_add_updates(
+        processed_data.txns_to_add,
         proxy_category_id,
         &processed_data.add_tag,
     );
 
-    let split_updates: Vec<TransactionAndSplitUpdate> = create_split_updates(
-        &processed_data.txns_to_split,
+    let split_updates: Vec<(Transaction, TransactionAndSplitUpdate)> = create_split_updates(
+        processed_data.txns_to_split,
         proxy_category_id,
         &processed_data.split_tag,
     );
@@ -29,14 +32,14 @@ pub fn create_updates(
 }
 
 fn create_add_updates(
-    txns_to_add: &Vec<Transaction>,
+    txns_to_add: Vec<Transaction>,
     proxy_category_id: u32,
     add_tag: &String,
-) -> Vec<TransactionUpdate> {
+) -> Vec<(Transaction, TransactionUpdate)> {
     txns_to_add
         .into_iter()
         .map(|txn| {
-            (
+            let update = (
                 txn.id,
                 TransactionUpdateItem {
                     payee: None,
@@ -45,23 +48,24 @@ fn create_add_updates(
                     tags: Some(tag_names_removing(&txn.tags, add_tag)),
                     status: Some(TransactionStatus::Cleared),
                 },
-            )
+            );
+            return (txn, update);
         })
         .collect()
 }
 
 fn create_split_updates(
-    txns_to_split: &Vec<Transaction>,
+    txns_to_split: Vec<Transaction>,
     proxy_category_id: u32,
     split_tag: &String,
-) -> Vec<TransactionAndSplitUpdate> {
+) -> Vec<(Transaction, TransactionAndSplitUpdate)> {
     txns_to_split
         .into_iter()
         .map(|txn| {
             let (creditor_amt, debtor_amt) = txn.amount.random_rounded_even_split();
             let (creditor_split, debtor_split) =
                 create_splits(creditor_amt, debtor_amt, proxy_category_id);
-            return (
+            let update = (
                 txn.id,
                 TransactionUpdateItem {
                     payee: None,
@@ -72,6 +76,7 @@ fn create_split_updates(
                 },
                 vec![creditor_split, debtor_split],
             );
+            return (txn, update);
         })
         .collect()
 }
@@ -208,11 +213,11 @@ mod tests {
 
         let proxy_category_id = 20;
         let (add_updates, split_updates) = super::create_updates(
-            &ProcessTagsOutput {
+            ProcessTagsOutput {
                 add_tag: add_tag,
                 split_tag: split_tag,
-                txns_to_add: vec![add_t1, add_t2],
-                txns_to_split: vec![split_t1, split_t2],
+                txns_to_add: vec![add_t1.clone(), add_t2.clone()],
+                txns_to_split: vec![split_t1.clone(), split_t2.clone()],
                 issues: vec![],
             },
             proxy_category_id,
@@ -220,79 +225,91 @@ mod tests {
 
         let assert_add_updates = vec![
             (
-                1024,
-                TransactionUpdateItem {
-                    payee: None,
-                    category_id: Some(proxy_category_id),
-                    notes: None,
-                    tags: Some(vec![]),
-                    status: Some(TransactionStatus::Cleared),
-                },
+                add_t1,
+                (
+                    1024,
+                    TransactionUpdateItem {
+                        payee: None,
+                        category_id: Some(proxy_category_id),
+                        notes: None,
+                        tags: Some(vec![]),
+                        status: Some(TransactionStatus::Cleared),
+                    },
+                ),
             ),
             (
-                1025,
-                TransactionUpdateItem {
-                    payee: None,
-                    category_id: Some(proxy_category_id),
-                    notes: None,
-                    tags: Some(vec!["external-tag".to_string()]),
-                    status: Some(TransactionStatus::Cleared),
-                },
+                add_t2,
+                (
+                    1025,
+                    TransactionUpdateItem {
+                        payee: None,
+                        category_id: Some(proxy_category_id),
+                        notes: None,
+                        tags: Some(vec!["external-tag".to_string()]),
+                        status: Some(TransactionStatus::Cleared),
+                    },
+                ),
             ),
         ];
 
         let assert_split_updates = vec![
             (
-                1026,
-                TransactionUpdateItem {
-                    payee: None,
-                    category_id: None,
-                    notes: None,
-                    tags: Some(vec![]),
-                    status: Some(TransactionStatus::Cleared),
-                },
-                vec![
-                    SplitUpdateItem {
-                        amount: USD::new_from_cents(750),
+                split_t1,
+                (
+                    1026,
+                    TransactionUpdateItem {
                         payee: None,
                         category_id: None,
                         notes: None,
-                        date: None,
+                        tags: Some(vec![]),
+                        status: Some(TransactionStatus::Cleared),
                     },
-                    SplitUpdateItem {
-                        amount: USD::new_from_cents(750),
-                        payee: None,
-                        category_id: Some(proxy_category_id),
-                        notes: None,
-                        date: None,
-                    },
-                ],
+                    vec![
+                        SplitUpdateItem {
+                            amount: USD::new_from_cents(750),
+                            payee: None,
+                            category_id: None,
+                            notes: None,
+                            date: None,
+                        },
+                        SplitUpdateItem {
+                            amount: USD::new_from_cents(750),
+                            payee: None,
+                            category_id: Some(proxy_category_id),
+                            notes: None,
+                            date: None,
+                        },
+                    ],
+                ),
             ),
             (
-                1027,
-                TransactionUpdateItem {
-                    payee: None,
-                    category_id: None,
-                    notes: None,
-                    tags: Some(vec!["external-tag".to_string()]),
-                    status: Some(TransactionStatus::Cleared),
-                },
-                vec![
-                    SplitUpdateItem {
-                        amount: USD::new_from_cents(600),
+                split_t2,
+                (
+                    1027,
+                    TransactionUpdateItem {
                         payee: None,
                         category_id: None,
                         notes: None,
-                        date: None,
+                        tags: Some(vec!["external-tag".to_string()]),
+                        status: Some(TransactionStatus::Cleared),
                     },
-                    SplitUpdateItem {
-                        amount: USD::new_from_cents(600),
-                        payee: None,
-                        category_id: Some(proxy_category_id),
-                        notes: None,
-                        date: None,
-                    },
-                ],
+                    vec![
+                        SplitUpdateItem {
+                            amount: USD::new_from_cents(600),
+                            payee: None,
+                            category_id: None,
+                            notes: None,
+                            date: None,
+                        },
+                        SplitUpdateItem {
+                            amount: USD::new_from_cents(600),
+                            payee: None,
+                            category_id: Some(proxy_category_id),
+                            notes: None,
+                            date: None,
+                        },
+                    ],
+                ),
             ),
         ];
 
