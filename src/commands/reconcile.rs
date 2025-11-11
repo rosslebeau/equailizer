@@ -100,7 +100,7 @@ async fn reconcile_batch(
         .iter()
         .map({
             |t| SplitUpdateItem {
-                amount: t.amount,
+                amount: -t.amount,
                 payee: Some(config.debtor.name.clone()),
                 category_id: Some(config.creditor.proxy_category_id),
                 notes: Some("equailizer".to_string()),
