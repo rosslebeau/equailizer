@@ -103,7 +103,7 @@ async fn reconcile_batch(
                 amount: -t.amount,
                 payee: Some(config.debtor.name.clone()),
                 category_id: Some(config.creditor.proxy_category_id),
-                notes: Some("equailizer".to_string()),
+                notes: Some(t.payee.clone()),
                 date: Some(t.date),
             }
         })
