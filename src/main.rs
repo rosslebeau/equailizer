@@ -13,7 +13,10 @@ pub mod usd;
 use crate::{
     commands::create_batch,
     config::Config,
-    lunch_money::model::transaction::{Transaction, TransactionStatus},
+    lunch_money::{
+        api::Client,
+        model::transaction::{Transaction, TransactionId, TransactionStatus},
+    },
     usd::USD,
 };
 use chrono::NaiveDate;
@@ -60,10 +63,16 @@ async fn main() {
             }
         }
         #[cfg(debug_assertions)]
-        cli::Commands::Dev { email } => {
-            tracing::info!("email command");
-            handle_dev_email();
-        }
+        cli::Commands::Dev(subcommand) => match subcommand {
+            cli::DevSubcommand::Email {} => {
+                tracing::info!("email command");
+                handle_dev_email();
+            }
+            cli::DevSubcommand::Txn { id, profile } => {
+                tracing::info!("dev txn command");
+                handle_dev_txn(id, profile).await;
+            }
+        },
     }
 
     if config::is_dry_run() {
@@ -140,4 +149,16 @@ fn handle_dev_email() {
     let warnings = vec!["Test warning: could not find something".to_string()];
 
     email::dev_print(&Uuid::new_v4().to_string(), txns, warnings);
+}
+
+async fn handle_dev_txn(id: TransactionId, profile: String) {
+    let config = config::read_config(&profile).expect("failed reading config");
+    let client = Client {
+        auth_token: config.creditor.api_key.to_owned(),
+    };
+    let txn = client
+        .get_transaction(id)
+        .await
+        .expect("failed getting txn");
+    tracing::info!("Got transaction: {:?}", txn);
 }

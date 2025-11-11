@@ -1,4 +1,6 @@
 use crate::date_helpers;
+#[cfg(debug_assertions)]
+use crate::lunch_money::model::transaction::TransactionId;
 use chrono::NaiveDate;
 use clap::{ArgAction, Args, Parser, Subcommand};
 
@@ -56,9 +58,19 @@ pub enum Commands {
         dry_run: bool,
     },
     #[cfg(debug_assertions)]
-    Dev {
-        #[arg(required = false, long = "email")]
-        email: bool,
+    #[command(subcommand)]
+    Dev(DevSubcommand),
+}
+
+#[cfg(debug_assertions)]
+#[derive(Debug, Subcommand)]
+pub enum DevSubcommand {
+    Email {},
+    Txn {
+        #[arg(required = true, long = "identifier", short = 'i')]
+        id: TransactionId,
+        #[arg(required = true, long = "profile", short = 'p')]
+        profile: String,
     },
 }
 
