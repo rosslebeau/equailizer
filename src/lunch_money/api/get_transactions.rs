@@ -56,8 +56,8 @@ impl Client {
     ) -> Result<Vec<Transaction>> {
         tracing::debug!(
             "Getting transactions by date: start date: {}, end date: {}",
-            start_date.format("MM/dd/YYYY").to_string(),
-            end_date.format("MM/dd/YYYY").to_string()
+            start_date.format("%m/%d/%Y").to_string(),
+            end_date.format("%m/%d/%Y").to_string()
         );
 
         let auth_header = format!("Bearer {}", self.auth_token);
