@@ -63,8 +63,13 @@ fn create_split_updates(
         .into_iter()
         .map(|txn| {
             let (creditor_amt, debtor_amt) = txn.amount.random_rounded_even_split();
-            let (creditor_split, debtor_split) =
-                create_splits(creditor_amt, debtor_amt, proxy_category_id);
+            let (creditor_split, debtor_split) = create_splits(
+                creditor_amt,
+                debtor_amt,
+                proxy_category_id,
+                txn.category_id,
+                txn.payee.to_owned(),
+            );
             let update = (
                 txn.id,
                 TransactionUpdateItem {
@@ -85,18 +90,20 @@ fn create_splits(
     creditor_amt: USD,
     debtor_amt: USD,
     proxy_category: u32,
+    original_category: Option<u32>,
+    original_payee: String,
 ) -> (SplitUpdateItem, SplitUpdateItem) {
     let creditor_split = SplitUpdateItem {
         amount: creditor_amt,
-        payee: None,
-        category_id: None,
+        payee: Some(original_payee.to_owned()),
+        category_id: original_category,
         notes: None,
         date: None,
     };
 
     let debtor_split = SplitUpdateItem {
         amount: debtor_amt,
-        payee: None,
+        payee: Some(original_payee),
         category_id: Some(proxy_category),
         notes: None,
         date: None,
