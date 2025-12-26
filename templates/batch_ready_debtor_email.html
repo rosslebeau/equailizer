@@ -1,0 +1,61 @@
+<!doctype html>
+<html>
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+        .btn_venmo {
+            display: inline-block;
+            padding: 16px 30px;
+            font-size: 14px;
+            color: #ffffff;
+            background-color: #007bff;
+            text-decoration: none;
+            border-radius: 6px;
+        }
+
+        .days_list_item {
+            padding-top: 20px;
+        }
+
+        ul {
+            list-style: none;
+        }
+
+        .days_list {
+            padding-left: 0;
+        }
+
+        .txns_list {
+            padding-top: 10px;
+        }
+    </style>
+</head>
+
+<body>
+    <p>New batch incoming!</p>
+    <div>
+        <p style="padding-top: 30px;">Total: {{ total }}</p>
+        <ul class="days_list">
+            {% for (date, txns) in txns_by_date %}
+            <li class="days_list_item">
+                <span style="font-weight: bold">{{ date }}</span>
+                <ul class="txns_list">
+                    {% for txn in txns %}
+                    <li>
+                        {{ txn.payee }} ${{ txn.amount }}
+                        {% if let Some(notes) = txn.notes %}
+                        <div style="padding-left: 16px">{{ notes }}</div>
+                        {% endif %}
+                    </li>
+                    {% endfor %}
+                </ul>
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+    <p style="padding-top: 30px;">Batch id: {{ batch_id }}</p>
+</body>
+
+</html>

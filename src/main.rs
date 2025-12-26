@@ -123,32 +123,38 @@ fn handle_dev_email() {
             payee: "Associated Market".to_string(),
             amount: USD::new_from_cents(2531),
             date: NaiveDate::from_ymd_opt(2025, 10, 21).expect("NaiveDate creation failed"),
+            notes: Some("test note".to_string()),
         },
         Txn {
             payee: "Associated Market".to_string(),
             amount: USD::new_from_cents(2531),
             date: NaiveDate::from_ymd_opt(2025, 10, 21).expect("NaiveDate creation failed"),
+            notes: None,
         },
         Txn {
             payee: "Associated Market".to_string(),
             amount: USD::new_from_cents(2531),
             date: NaiveDate::from_ymd_opt(2025, 10, 21).expect("NaiveDate creation failed"),
+            notes: Some("even more test notes".to_string()),
         },
         Txn {
             payee: "Associated Market".to_string(),
             amount: USD::new_from_cents(2531),
             date: NaiveDate::from_ymd_opt(2025, 10, 21).expect("NaiveDate creation failed"),
+            notes: Some("testing again note".to_string()),
         },
         Txn {
             payee: "Associated Market".to_string(),
             amount: USD::new_from_cents(2531),
             date: NaiveDate::from_ymd_opt(2025, 10, 21).expect("NaiveDate creation failed"),
+            notes: None,
         },
     ];
 
     let warnings = vec!["Test warning: could not find something".to_string()];
 
-    email::dev_print(&Uuid::new_v4().to_string(), txns, warnings);
+    let total = USD::new_from_cents(10842);
+    email::dev_print(&Uuid::new_v4().to_string(), txns, warnings, &total);
 }
 
 async fn handle_dev_txn(id: TransactionId, profile: String) {

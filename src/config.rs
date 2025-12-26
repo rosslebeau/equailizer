@@ -50,6 +50,7 @@ pub struct Debtor {
     pub api_key: String,
     pub name: String,
     pub settlement_account_id: u32,
+    pub email_address: String,
     pub venmo_username: String,
 }
 

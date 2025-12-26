@@ -115,7 +115,7 @@ pub async fn create_batch(
 
     // Send the batch notification email.
     let email_warnings: Vec<String> = issues.iter().map(|i| text_for_issue(i)).collect();
-    email::send_email(&batch_id, &total_amount, email_txns, email_warnings, config).await?;
+    email::send_emails(&batch_id, &total_amount, email_txns, email_warnings, config).await?;
 
     tracing::debug!(amount = ?total_amount, batch_id, "Finished creating batch");
     Ok(())
@@ -140,6 +140,7 @@ async fn execute_adds(
                         payee: txn.payee,
                         amount: txn.amount,
                         date: txn.date,
+                        notes: txn.notes,
                     },
                 ));
             }
@@ -183,6 +184,7 @@ async fn execute_splits(
                                 payee: txn.payee,
                                 amount: split_amount,
                                 date: txn.date,
+                                notes: txn.notes
                             },
                         ));
                     }
