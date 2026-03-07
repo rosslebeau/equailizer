@@ -6,7 +6,7 @@ use crate::{
             update_transaction::{SplitUpdateItem, TransactionUpdateItem},
             LunchMoney,
         },
-        model::transaction::Transaction,
+        model::transaction::{Transaction, TransactionId, TransactionStatus},
     },
     persist::{Batch, Persistence, Settlement},
     usd::USD,
@@ -136,15 +136,21 @@ async fn reconcile_batch(
         &config.debtor.name,
         config.creditor.proxy_category_id,
     );
-    creditor_api
+    let creditor_split_response = creditor_api
         .update_split((settlement_credit.id, creditor_splits))
         .await?;
 
     // Split out the debtor's side to match the transactions in the batch.
     let debtor_splits = build_debtor_splits(&batch_txns);
-    debtor_api
+    let debtor_split_response = debtor_api
         .update_split((settlement_debit.id, debtor_splits))
         .await?;
+
+    // Clear settlement parents and all split children.
+    clear_transactions(&[settlement_credit.id], creditor_api).await?;
+    clear_transactions(&creditor_split_response.split_ids, creditor_api).await?;
+    clear_transactions(&[settlement_debit.id], debtor_api).await?;
+    clear_transactions(&debtor_split_response.split_ids, debtor_api).await?;
 
     // Remove the pending reconciliation tag from batch transactions.
     remove_pending_tags(&batch_txns, creditor_api).await?;
@@ -212,6 +218,28 @@ pub fn build_debtor_splits(batch_txns: &[Transaction]) -> Vec<SplitUpdateItem> {
             date: Some(t.date),
         })
         .collect()
+}
+
+/// Mark each transaction as cleared.
+async fn clear_transactions(
+    ids: &[TransactionId],
+    api: &(impl LunchMoney + Sync),
+) -> Result<()> {
+    for &id in ids {
+        api.update_transaction((
+            id,
+            TransactionUpdateItem {
+                payee: None,
+                category_id: None,
+                notes: None,
+                tags: None,
+                status: Some(TransactionStatus::Cleared),
+            },
+        ))
+        .await?;
+    }
+    tracing::debug!(count = ids.len(), ?ids, "Cleared transactions");
+    Ok(())
 }
 
 /// Remove the pending reconciliation tag from each batch transaction.

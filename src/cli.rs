@@ -72,6 +72,12 @@ pub enum DevSubcommand {
         #[arg(required = true, long = "profile", short = 'p')]
         profile: String,
     },
+    SplitChildren {
+        #[arg(required = true, long = "identifier", short = 'i')]
+        id: TransactionId,
+        #[arg(required = true, long = "profile", short = 'p')]
+        profile: String,
+    },
 }
 
 pub fn start_date_from_args(args: StartArgs) -> NaiveDate {

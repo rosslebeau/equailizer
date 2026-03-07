@@ -74,6 +74,10 @@ async fn main() {
                 tracing::info!("dev txn command");
                 handle_dev_txn(id, profile).await;
             }
+            cli::DevSubcommand::SplitChildren { id, profile } => {
+                tracing::info!("dev split-children command");
+                handle_dev_split_children(id, profile).await;
+            }
         },
     }
 
@@ -261,4 +265,61 @@ async fn handle_dev_txn(id: TransactionId, profile: String) {
         .await
         .expect("failed getting txn");
     tracing::info!("Got transaction: {:?}", txn);
+}
+
+async fn handle_dev_split_children(id: TransactionId, profile: String) {
+    use equailizer::lunch_money::api::LunchMoney;
+    let config = equailizer::config::read_config(&profile).expect("failed reading config");
+    let client = LunchMoneyClient {
+        auth_token: config.creditor.api_key.to_owned(),
+        dry_run: false,
+    };
+
+    let parent = client
+        .get_transaction(id)
+        .await
+        .expect("failed getting parent transaction");
+
+    if !parent.has_children {
+        tracing::error!(id, "Transaction is not a split parent (has_children=false)");
+        return;
+    }
+
+    tracing::info!(
+        id = parent.id,
+        payee = %parent.payee,
+        amount = %parent.amount,
+        status = ?parent.status,
+        "Parent transaction"
+    );
+
+    // Search a window around the parent's date to find children
+    let search_start = parent.date - chrono::Days::new(7);
+    let search_end = parent.date + chrono::Days::new(30);
+    let all_txns = client
+        .get_transactions(search_start, search_end)
+        .await
+        .expect("failed getting transactions");
+
+    let children: Vec<_> = all_txns
+        .iter()
+        .filter(|t| t.parent_id == Some(id))
+        .collect();
+
+    if children.is_empty() {
+        tracing::warn!(id, "No children found in date window");
+        return;
+    }
+
+    for child in &children {
+        tracing::info!(
+            id = child.id,
+            payee = %child.payee,
+            amount = %child.amount,
+            status = ?child.status,
+            "Child transaction"
+        );
+    }
+
+    tracing::info!(count = children.len(), "Total children found");
 }

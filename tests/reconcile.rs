@@ -4,6 +4,8 @@ use equailizer::commands::reconcile::{
     build_creditor_splits, build_debtor_splits, find_settlement_transaction,
 };
 use equailizer::config::{self, Config, Creditor, Debtor, JMAP};
+use equailizer::lunch_money::api::update_transaction::TransactionUpdateItem;
+use equailizer::lunch_money::model::transaction::TransactionStatus;
 use equailizer::persist::{Batch, Settlement};
 use equailizer::usd::USD;
 use support::builders::{test_transaction, TransactionBuilder};
@@ -216,6 +218,36 @@ async fn reconcile_batch_end_to_end() {
     assert_eq!(debtor_splits[0].0, 60); // settlement debit txn id
     assert_eq!(debtor_splits[0].1.len(), 2);
 
+    // Verify settlement parents and split children were all cleared.
+    // Mock returns [100, 101] as default split child IDs.
+    let cleared = |update: &TransactionUpdateItem| -> bool {
+        update.status == Some(TransactionStatus::Cleared)
+            && update.payee.is_none()
+            && update.tags.is_none()
+    };
+
+    let creditor_updates = creditor_api.updates_received.lock().unwrap();
+    // Settlement parent (50) + 2 children (100, 101)
+    let creditor_clears: Vec<_> = creditor_updates
+        .iter()
+        .filter(|(_, u)| cleared(u))
+        .collect();
+    assert_eq!(creditor_clears.len(), 3);
+    assert_eq!(creditor_clears[0].0, 50);
+    assert_eq!(creditor_clears[1].0, 100);
+    assert_eq!(creditor_clears[2].0, 101);
+
+    let debtor_updates = debtor_api.updates_received.lock().unwrap();
+    // Settlement parent (60) + 2 children (100, 101)
+    let debtor_clears: Vec<_> = debtor_updates
+        .iter()
+        .filter(|(_, u)| cleared(u))
+        .collect();
+    assert_eq!(debtor_clears.len(), 3);
+    assert_eq!(debtor_clears[0].0, 60);
+    assert_eq!(debtor_clears[1].0, 100);
+    assert_eq!(debtor_clears[2].0, 101);
+
     // Verify batch was saved with settlement info
     let saved = persistence.saved_batches();
     let reconciled = saved.iter().find(|b| b.id == "test-batch-1").unwrap();
@@ -361,15 +393,23 @@ async fn reconcile_removes_pending_tag_from_batch_transactions() {
     .await
     .expect("reconcile should succeed");
 
-    // Verify update_transaction was called to remove the pending tag
+    // Verify update_transaction was called for clearing and tag removal.
+    // Order: clear settlement parent (50), clear children (100, 101), then tag removals (10, 11).
     let updates = creditor_api.updates_received.lock().unwrap();
-    assert_eq!(updates.len(), 2);
+    assert_eq!(updates.len(), 5);
 
-    // First txn: had only eq-pending, should now have empty tags
-    assert_eq!(updates[0].0, 10);
-    assert_eq!(updates[0].1.tags, Some(vec![]));
+    // First 3: clearing calls (settlement parent + 2 children)
+    assert_eq!(updates[0].0, 50);
+    assert_eq!(updates[0].1.status, Some(TransactionStatus::Cleared));
+    assert_eq!(updates[1].0, 100);
+    assert_eq!(updates[1].1.status, Some(TransactionStatus::Cleared));
+    assert_eq!(updates[2].0, 101);
+    assert_eq!(updates[2].1.status, Some(TransactionStatus::Cleared));
 
-    // Second txn: had eq-pending + external-tag, should keep only external-tag
-    assert_eq!(updates[1].0, 11);
-    assert_eq!(updates[1].1.tags, Some(vec!["external-tag".to_string()]));
+    // Last 2: tag removal calls
+    assert_eq!(updates[3].0, 10);
+    assert_eq!(updates[3].1.tags, Some(vec![]));
+
+    assert_eq!(updates[4].0, 11);
+    assert_eq!(updates[4].1.tags, Some(vec!["external-tag".to_string()]));
 }
