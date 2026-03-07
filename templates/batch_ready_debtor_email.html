@@ -40,7 +40,7 @@
         <ul class="days_list">
             {% for (date, txns) in txns_by_date %}
             <li class="days_list_item">
-                <span style="font-weight: bold">{{ date }}</span>
+                <span style="font-weight: bold">{{ date.format("%b %d, %Y") }}</span>
                 <ul class="txns_list">
                     {% for txn in txns %}
                     <li>

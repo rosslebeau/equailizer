@@ -5,7 +5,7 @@ use askama::Template;
 use async_trait::async_trait;
 use chrono::NaiveDate;
 use jmap_client::{client::Client, core::response::MethodResponse::*, email::EmailBodyPart};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 pub struct Txn {
     pub payee: String,
@@ -260,7 +260,7 @@ fn venmo_request_link(venmo_username: &str, text: &str, amount: &USD) -> String 
 #[derive(Template)]
 #[template(path = "batch_ready_creditor_email.html")]
 struct BatchReadyEmailTemplate<'a> {
-    txns_by_date: HashMap<String, Vec<&'a Txn>>,
+    txns_by_date: BTreeMap<NaiveDate, Vec<&'a Txn>>,
     venmo_request_link: &'a String,
     warnings: Vec<String>,
     batch_id: &'a String,
@@ -274,14 +274,7 @@ pub fn make_creditor_email_html_string(
     batch_id: &String,
     total: &USD,
 ) -> String {
-    let txns_by_date: HashMap<String, Vec<&Txn>> =
-        txns.iter()
-            .fold(HashMap::<String, Vec<&Txn>>::new(), |mut acc, txn| {
-                acc.entry(txn.date.format("%b %d, %Y").to_string())
-                    .or_insert_with(Vec::new)
-                    .push(txn);
-                acc
-            });
+    let txns_by_date = group_txns_by_date(txns);
 
     let email = BatchReadyEmailTemplate {
         txns_by_date,
@@ -297,20 +290,13 @@ pub fn make_creditor_email_html_string(
 #[derive(Template)]
 #[template(path = "batch_ready_debtor_email.html")]
 struct BatchReadyDebtorEmailTemplate<'a> {
-    txns_by_date: HashMap<String, Vec<&'a Txn>>,
+    txns_by_date: BTreeMap<NaiveDate, Vec<&'a Txn>>,
     batch_id: &'a String,
     total: &'a USD,
 }
 
 pub fn make_debtor_email_html_string(txns: &[Txn], batch_id: &String, total: &USD) -> String {
-    let txns_by_date: HashMap<String, Vec<&Txn>> =
-        txns.iter()
-            .fold(HashMap::<String, Vec<&Txn>>::new(), |mut acc, txn| {
-                acc.entry(txn.date.format("%b %d, %Y").to_string())
-                    .or_insert_with(Vec::new)
-                    .push(txn);
-                acc
-            });
+    let txns_by_date = group_txns_by_date(txns);
 
     let email = BatchReadyDebtorEmailTemplate {
         txns_by_date,
@@ -319,6 +305,14 @@ pub fn make_debtor_email_html_string(txns: &[Txn], batch_id: &String, total: &US
     };
 
     email.render().unwrap()
+}
+
+fn group_txns_by_date<'a>(txns: &'a [Txn]) -> BTreeMap<NaiveDate, Vec<&'a Txn>> {
+    txns.iter()
+        .fold(BTreeMap::<NaiveDate, Vec<&Txn>>::new(), |mut acc, txn| {
+            acc.entry(txn.date).or_insert_with(Vec::new).push(txn);
+            acc
+        })
 }
 
 #[cfg(debug_assertions)]
