@@ -1,6 +1,7 @@
 use crate::{
     config::{self, Config},
     date_helpers,
+    issue::Issue,
     lunch_money::{
         api::{
             update_transaction::{SplitUpdateItem, TransactionUpdateItem},
@@ -18,24 +19,31 @@ pub async fn reconcile_all(
     creditor_api: &(impl LunchMoney + Sync),
     debtor_api: &(impl LunchMoney + Sync),
     persistence: &(impl Persistence + Sync),
-) -> Result<()> {
+) -> Result<Vec<Issue>> {
     let unreconciled = persistence.unreconciled_batches()?;
     let total = unreconciled.len();
     tracing::info!(unreconciled_batches = total, "Starting reconcile-all");
 
     if total == 0 {
         tracing::info!("No unreconciled batches found");
-        return Ok(());
+        return Ok(vec![]);
     }
 
     let mut reconciled = 0u32;
+    let mut issues: Vec<Issue> = vec![];
     for batch in unreconciled {
-        reconcile_batch(batch, config, creditor_api, debtor_api, persistence).await?;
-        reconciled += 1;
+        let batch_id = batch.id.clone();
+        match reconcile_batch(batch, config, creditor_api, debtor_api, persistence).await {
+            Ok(()) => reconciled += 1,
+            Err(e) => {
+                tracing::warn!(batch_id, error = %e, "Failed to reconcile batch");
+                issues.push(Issue::BatchReconcileError(batch_id, format!("{e:#}")));
+            }
+        }
     }
 
-    tracing::info!(reconciled, total, "Reconcile-all complete");
-    Ok(())
+    tracing::info!(reconciled, failed = issues.len(), total, "Reconcile-all complete");
+    Ok(issues)
 }
 
 pub async fn reconcile_batch_name(

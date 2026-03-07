@@ -330,7 +330,7 @@ async fn reconcile_all_processes_unreconciled_batches() {
     let persistence =
         InMemoryPersistence::with_batches(vec![unreconciled_batch, already_reconciled]);
 
-    equailizer::commands::reconcile::reconcile_all(
+    let issues = equailizer::commands::reconcile::reconcile_all(
         &config,
         &creditor_api,
         &debtor_api,
@@ -338,6 +338,8 @@ async fn reconcile_all_processes_unreconciled_batches() {
     )
     .await
     .expect("reconcile_all should succeed");
+
+    assert!(issues.is_empty());
 
     // Only the unreconciled batch should have been processed
     let splits = creditor_api.splits_received.lock().unwrap();
@@ -347,6 +349,68 @@ async fn reconcile_all_processes_unreconciled_batches() {
     let saved = persistence.saved_batches();
     let batch = saved.iter().find(|b| b.id == "unreconciled-1").unwrap();
     assert!(batch.reconciliation.is_some());
+}
+
+#[tokio::test]
+async fn reconcile_all_continues_after_batch_failure() {
+    let config = test_config();
+
+    // Batch 1: will fail — no matching settlement credit
+    let batch_txn_1 = test_transaction(10, 1500)
+        .with_payee("Store A")
+        .with_date(2025, 4, 1);
+
+    // Batch 2: will succeed
+    let batch_txn_2 = test_transaction(20, 2000)
+        .with_payee("Store B")
+        .with_date(2025, 4, 2);
+    let settlement_credit = test_transaction(50, -2000)
+        .with_account(1000)
+        .with_date(2025, 4, 5);
+    let settlement_debit = test_transaction(60, 2000)
+        .with_account(2000)
+        .with_date(2025, 4, 5);
+
+    let creditor_api =
+        MockLunchMoney::new(vec![batch_txn_1, batch_txn_2, settlement_credit]);
+    let debtor_api = MockLunchMoney::new(vec![settlement_debit]);
+
+    let failing_batch = Batch {
+        id: "will-fail".to_string(),
+        amount: USD::new_from_cents(1500),
+        transaction_ids: vec![10],
+        reconciliation: None,
+    };
+    let succeeding_batch = Batch {
+        id: "will-succeed".to_string(),
+        amount: USD::new_from_cents(2000),
+        transaction_ids: vec![20],
+        reconciliation: None,
+    };
+    let persistence =
+        InMemoryPersistence::with_batches(vec![failing_batch, succeeding_batch]);
+
+    let issues = equailizer::commands::reconcile::reconcile_all(
+        &config,
+        &creditor_api,
+        &debtor_api,
+        &persistence,
+    )
+    .await
+    .expect("reconcile_all should succeed even with batch failures");
+
+    // One batch failed, so we should have one issue
+    assert_eq!(issues.len(), 1);
+    assert!(issues[0].to_string().contains("will-fail"));
+
+    // The succeeding batch should still be reconciled
+    let saved = persistence.saved_batches();
+    let succeeded = saved.iter().find(|b| b.id == "will-succeed").unwrap();
+    assert!(succeeded.reconciliation.is_some());
+
+    // The failing batch should remain unreconciled
+    let failed = saved.iter().find(|b| b.id == "will-fail").unwrap();
+    assert!(failed.reconciliation.is_none());
 }
 
 #[tokio::test]

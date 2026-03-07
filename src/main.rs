@@ -60,7 +60,12 @@ async fn main() {
                 "Starting command"
             );
             match handle_reconcile_all(profile, dry_run).await {
-                Ok(_) => tracing::info!("Finished reconcile-all command successfully"),
+                Ok(issues) => {
+                    for issue in &issues {
+                        tracing::warn!("{}", issue);
+                    }
+                    tracing::info!("Finished reconcile-all command successfully");
+                }
                 Err(e) => tracing::error!("{e:#}", e = e),
             }
         }
@@ -147,7 +152,7 @@ async fn handle_reconcile(
     .await
 }
 
-async fn handle_reconcile_all(profile: String, dry_run: bool) -> anyhow::Result<()> {
+async fn handle_reconcile_all(profile: String, dry_run: bool) -> anyhow::Result<Vec<equailizer::issue::Issue>> {
     let config = equailizer::config::read_config(&profile)?;
     let creditor_api = LunchMoneyClient {
         auth_token: config.creditor.api_key.clone(),
