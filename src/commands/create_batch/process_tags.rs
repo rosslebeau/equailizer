@@ -19,9 +19,14 @@ pub fn process_tags(
 ) -> ProcessTagsOutput {
     let span = tracing::info_span!("Processing Tags");
     let _enter = span.enter();
-    tracing::debug!("Starting");
 
     let mut issues: Vec<Issue> = vec![];
+
+    let total_count = in_txns.len();
+    let pending_count = in_txns.iter().filter(|t| t.is_pending).count();
+    if pending_count > 0 {
+        tracing::info!(pending_count, "Skipping pending transactions");
+    }
 
     // Just ignore pending transactions
     let (txns_to_add, txns_to_split) = in_txns.into_iter().filter(|t| !t.is_pending).fold(
@@ -34,6 +39,15 @@ pub fn process_tags(
             }
             return (add, split);
         },
+    );
+
+    tracing::info!(
+        total = total_count,
+        pending_skipped = pending_count,
+        tagged_add = txns_to_add.len(),
+        tagged_split = txns_to_split.len(),
+        untagged = total_count - pending_count - txns_to_add.len() - txns_to_split.len(),
+        "Transaction breakdown"
     );
 
     tracing::debug!(

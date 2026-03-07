@@ -50,9 +50,9 @@ pub(super) async fn get_by_date_range(
     end_date: NaiveDate,
 ) -> Result<Vec<Transaction>> {
     tracing::debug!(
-        "Getting transactions by date: start date: {}, end date: {}",
-        start_date.format("%m/%d/%Y"),
-        end_date.format("%m/%d/%Y")
+        start_date = %start_date.format("%Y-%m-%d"),
+        end_date = %end_date.format("%Y-%m-%d"),
+        "Fetching transactions by date range"
     );
 
     let auth_header = format!("Bearer {}", client.auth_token);
@@ -87,7 +87,7 @@ pub(super) async fn get_by_date_range(
         tracing::debug!(offset, "Fetching next page of transactions");
     }
 
-    tracing::debug!(
+    tracing::info!(
         count = all_transactions.len(),
         "Finished fetching all transactions"
     );

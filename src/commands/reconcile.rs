@@ -17,9 +17,21 @@ pub async fn reconcile_all(
     persistence: &(impl Persistence + Sync),
 ) -> Result<()> {
     let unreconciled = persistence.unreconciled_batches()?;
+    let total = unreconciled.len();
+    tracing::info!(unreconciled_batches = total, "Starting reconcile-all");
+
+    if total == 0 {
+        tracing::info!("No unreconciled batches found");
+        return Ok(());
+    }
+
+    let mut reconciled = 0u32;
     for batch in unreconciled {
         reconcile_batch(batch, config, creditor_api, debtor_api, persistence).await?;
+        reconciled += 1;
     }
+
+    tracing::info!(reconciled, total, "Reconcile-all complete");
     Ok(())
 }
 
@@ -47,9 +59,15 @@ async fn reconcile_batch(
     debtor_api: &(impl LunchMoney + Sync),
     persistence: &(impl Persistence + Sync),
 ) -> Result<()> {
-    let span = tracing::info_span!("Reconcile Batch");
+    let span = tracing::info_span!("Reconcile Batch", batch_id = %batch.id);
     let _enter = span.enter();
-    tracing::debug!(batch.id, "Starting");
+
+    tracing::info!(
+        batch_id = %batch.id,
+        amount = %batch.amount,
+        transaction_count = batch.transaction_ids.len(),
+        "Starting batch reconciliation"
+    );
 
     let batch_txns = creditor_api
         .get_transactions_by_id(&batch.transaction_ids)
@@ -62,29 +80,52 @@ async fn reconcile_batch(
         .max()
         .ok_or_else(|| anyhow::anyhow!("no creditor transactions while trying to reconcile"))?;
 
+    let search_end = date_helpers::now_date_naive_eastern();
+    tracing::debug!(
+        search_start = %last_txn_date.format("%Y-%m-%d"),
+        search_end = %search_end.format("%Y-%m-%d"),
+        "Searching for settlement transactions"
+    );
+
     // Find the settlement credit on the creditor's side.
     let creditor_txns = creditor_api
-        .get_transactions(last_txn_date, date_helpers::now_date_naive_eastern())
+        .get_transactions(last_txn_date, search_end)
         .await?;
     let settlement_credit = find_settlement_transaction(
         &creditor_txns,
         -batch.amount,
         config.creditor.settlement_account_id,
     )
-    .ok_or_else(|| anyhow::anyhow!("did not find suitable settlement credit"))?
+    .ok_or_else(|| anyhow::anyhow!(
+        "did not find settlement credit for {} in {} creditor transactions (account {})",
+        -batch.amount, creditor_txns.len(), config.creditor.settlement_account_id
+    ))?
     .clone();
+
+    tracing::info!(
+        settlement_credit_id = settlement_credit.id,
+        "Found creditor settlement"
+    );
 
     // Find the settlement debit on the debtor's side.
     let debtor_txns = debtor_api
-        .get_transactions(last_txn_date, date_helpers::now_date_naive_eastern())
+        .get_transactions(last_txn_date, search_end)
         .await?;
     let settlement_debit = find_settlement_transaction(
         &debtor_txns,
         batch.amount,
         config.debtor.settlement_account_id,
     )
-    .ok_or_else(|| anyhow::anyhow!("did not find suitable settlement debit"))?
+    .ok_or_else(|| anyhow::anyhow!(
+        "did not find settlement debit for {} in {} debtor transactions (account {})",
+        batch.amount, debtor_txns.len(), config.debtor.settlement_account_id
+    ))?
     .clone();
+
+    tracing::info!(
+        settlement_debit_id = settlement_debit.id,
+        "Found debtor settlement"
+    );
 
     // Split out the creditor's side to match the transactions in the batch.
     let creditor_splits = build_creditor_splits(
@@ -104,7 +145,7 @@ async fn reconcile_batch(
 
     // Save batch so we know it's reconciled.
     persistence.save_batch(&Batch {
-        id: batch.id,
+        id: batch.id.clone(),
         amount: batch.amount,
         transaction_ids: batch.transaction_ids,
         reconciliation: Some(Settlement {
@@ -113,7 +154,12 @@ async fn reconcile_batch(
         }),
     })?;
 
-    tracing::debug!("Finished");
+    tracing::info!(
+        batch_id = %batch.id,
+        settlement_credit_id = settlement_credit.id,
+        settlement_debit_id = settlement_debit.id,
+        "Batch reconciled"
+    );
     Ok(())
 }
 

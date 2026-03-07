@@ -106,15 +106,22 @@ impl JmapEmailSender {
         txns: &[Txn],
         warnings: Vec<String>,
     ) -> Result<()> {
-        tracing::debug!(
-            self.sending_address,
-            self.creditor_email,
-            "Sending creditor email"
-        );
-
         if self.dry_run {
+            tracing::info!(
+                to = %self.creditor_email,
+                batch_id,
+                "Dry run — skipping creditor email"
+            );
             return Ok(());
         }
+
+        tracing::info!(
+            to = %self.creditor_email,
+            batch_id,
+            amount = %total,
+            transaction_count = txns.len(),
+            "Sending creditor email"
+        );
 
         let mut email_req = client.build();
         let email_set_req = email_req.set_email();
@@ -172,10 +179,10 @@ impl JmapEmailSender {
             .email_submission_create(email_id, sending_identity.to_string())
             .await?;
 
-        tracing::debug!(
-            self.sending_address,
-            self.creditor_email,
-            "creditor email sent"
+        tracing::info!(
+            to = %self.creditor_email,
+            batch_id,
+            "Creditor email sent"
         );
 
         Ok(())
@@ -190,8 +197,21 @@ impl JmapEmailSender {
         txns: &[Txn],
     ) -> Result<()> {
         if self.dry_run {
+            tracing::info!(
+                to = %self.debtor_email,
+                batch_id,
+                "Dry run — skipping debtor email"
+            );
             return Ok(());
         }
+
+        tracing::info!(
+            to = %self.debtor_email,
+            batch_id,
+            amount = %total,
+            transaction_count = txns.len(),
+            "Sending debtor email"
+        );
 
         let mut email_req = client.build();
         let email_set_req = email_req.set_email();
@@ -240,10 +260,10 @@ impl JmapEmailSender {
             .email_submission_create(email_id, sending_identity.to_string())
             .await?;
 
-        tracing::debug!(
-            self.sending_address,
-            self.debtor_email,
-            "debtor email sent"
+        tracing::info!(
+            to = %self.debtor_email,
+            batch_id,
+            "Debtor email sent"
         );
 
         Ok(())

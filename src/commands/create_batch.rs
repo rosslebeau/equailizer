@@ -34,11 +34,16 @@ pub async fn create_batch(
 ) -> Result<()> {
     let span = tracing::info_span!("Create Batch");
     let _enter = span.enter();
-    tracing::debug!("Starting");
 
     if start_date.cmp(&end_date) == std::cmp::Ordering::Greater {
         anyhow::bail!("start date cannot be after end date");
     }
+
+    tracing::info!(
+        start_date = %start_date.format("%Y-%m-%d"),
+        end_date = %end_date.format("%Y-%m-%d"),
+        "Fetching transactions"
+    );
 
     // Get all transactions in provided date range.
     let txns = api.get_transactions(start_date, end_date).await?;
@@ -51,14 +56,26 @@ pub async fn create_batch(
         &config::TAG_BATCH_SPLIT.to_string(),
     );
 
+    let add_count = processed.txns_to_add.len();
+    let split_count = processed.txns_to_split.len();
+
     // Check that we found at least 1 valid transaction.
-    if processed.txns_to_add.iter().count() + processed.txns_to_split.iter().count() == 0 {
-        tracing::info!("No valid transactions found to create batch from");
+    if add_count + split_count == 0 {
+        tracing::info!("No tagged transactions found — nothing to batch");
         return Ok(());
     }
 
+    tracing::info!(
+        to_add = add_count,
+        to_split = split_count,
+        "Tagged transactions found"
+    );
+
     // Capture tag-processing issues before consuming the processed data.
     let mut issues: Vec<Issue> = processed.issues.drain(..).collect();
+    for issue in &issues {
+        tracing::warn!("{}", text_for_issue(issue));
+    }
 
     // Create actionable updates for the processed results.
     let (add_updates, split_updates) = create_updates(processed, config.creditor.proxy_category_id);
@@ -96,11 +113,10 @@ pub async fn create_batch(
 
     // Create batch id and save to local data.
     let batch_id = Uuid::new_v4().to_string();
-    tracing::debug!(batch_id, "Saving new batch");
     let batch: Batch = Batch {
         id: Uuid::new_v4().to_string(),
         amount: total_amount,
-        transaction_ids: batched_ids,
+        transaction_ids: batched_ids.clone(),
         reconciliation: None,
     };
     persistence.save_batch(&batch)?;
@@ -111,7 +127,13 @@ pub async fn create_batch(
         .send_batch_emails(&batch_id, &total_amount, &email_txns, email_warnings)
         .await?;
 
-    tracing::debug!(amount = ?total_amount, batch_id, "Finished creating batch");
+    tracing::info!(
+        batch_id,
+        amount = %total_amount,
+        transaction_count = batched_ids.len(),
+        warnings = issues.len(),
+        "Batch created"
+    );
     Ok(())
 }
 
@@ -139,6 +161,7 @@ async fn execute_adds(
                 ));
             }
             Err(e) => {
+                tracing::warn!(txn_id = txn.id, error = %e, "Failed to update transaction");
                 issues.push(Issue::TransactionUpdateError(txn.id, e.to_string()));
             }
         }
@@ -185,11 +208,13 @@ async fn execute_splits(
                         ));
                     }
                     Err(e) => {
+                        tracing::warn!(txn_id = txn.id, error = %e, "Split response missing expected ID");
                         issues.push(Issue::TransactionUpdateError(txn.id, e.to_string()));
                     }
                 }
             }
             Err(e) => {
+                tracing::warn!(txn_id = txn.id, error = %e, "Failed to split transaction");
                 issues.push(Issue::TransactionUpdateError(txn.id, e.to_string()));
             }
         }

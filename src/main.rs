@@ -24,15 +24,15 @@ async fn main() {
             profile,
             dry_run,
         } => {
-            if dry_run {
-                tracing::info!("dry run beginning");
-            }
+            tracing::info!(
+                command = "create-batch",
+                profile,
+                dry_run,
+                "Starting command"
+            );
             match handle_create_batch(start, end_date, profile, dry_run).await {
                 Ok(_) => tracing::info!("Finished create-batch command successfully"),
                 Err(e) => tracing::error!("{e:#}", e = e),
-            }
-            if dry_run {
-                tracing::info!("Dry run ended");
             }
         }
         cli::Commands::Reconcile {
@@ -40,27 +40,28 @@ async fn main() {
             profile,
             dry_run,
         } => {
-            if dry_run {
-                tracing::info!("dry run beginning");
-            }
+            tracing::info!(
+                command = "reconcile",
+                profile,
+                batch_name,
+                dry_run,
+                "Starting command"
+            );
             match handle_reconcile(batch_name, profile, dry_run).await {
                 Ok(_) => tracing::info!("Finished reconcile command successfully"),
                 Err(e) => tracing::error!("{e:#}", e = e),
             }
-            if dry_run {
-                tracing::info!("Dry run ended");
-            }
         }
         cli::Commands::ReconcileAll { profile, dry_run } => {
-            if dry_run {
-                tracing::info!("dry run beginning");
-            }
+            tracing::info!(
+                command = "reconcile-all",
+                profile,
+                dry_run,
+                "Starting command"
+            );
             match handle_reconcile_all(profile, dry_run).await {
                 Ok(_) => tracing::info!("Finished reconcile-all command successfully"),
                 Err(e) => tracing::error!("{e:#}", e = e),
-            }
-            if dry_run {
-                tracing::info!("Dry run ended");
             }
         }
         #[cfg(debug_assertions)]
@@ -164,42 +165,87 @@ async fn handle_reconcile_all(profile: String, dry_run: bool) -> anyhow::Result<
 }
 
 fn handle_dev_email() {
+    let d = |m: u32, d: u32| NaiveDate::from_ymd_opt(2026, m, d).unwrap();
+
     let txns: Vec<Txn> = vec![
+        // Monday - 2 transactions
         Txn {
-            payee: "Associated Market".to_string(),
-            amount: USD::new_from_cents(2531),
-            date: NaiveDate::from_ymd_opt(2025, 10, 21).expect("NaiveDate creation failed"),
-            notes: Some("test note".to_string()),
-        },
-        Txn {
-            payee: "Associated Market".to_string(),
-            amount: USD::new_from_cents(2531),
-            date: NaiveDate::from_ymd_opt(2025, 10, 21).expect("NaiveDate creation failed"),
+            payee: "Food Garden Market".to_string(),
+            amount: USD::new_from_cents(3736),
+            date: d(2, 23),
             notes: None,
         },
         Txn {
-            payee: "Associated Market".to_string(),
-            amount: USD::new_from_cents(2531),
-            date: NaiveDate::from_ymd_opt(2025, 10, 21).expect("NaiveDate creation failed"),
-            notes: Some("even more test notes".to_string()),
-        },
-        Txn {
-            payee: "Associated Market".to_string(),
-            amount: USD::new_from_cents(2531),
-            date: NaiveDate::from_ymd_opt(2025, 10, 21).expect("NaiveDate creation failed"),
-            notes: Some("testing again note".to_string()),
-        },
-        Txn {
-            payee: "Associated Market".to_string(),
-            amount: USD::new_from_cents(2531),
-            date: NaiveDate::from_ymd_opt(2025, 10, 21).expect("NaiveDate creation failed"),
+            payee: "Bagel Pub Park Slope".to_string(),
+            amount: USD::new_from_cents(1811),
+            date: d(2, 23),
             notes: None,
+        },
+        // Tuesday - 1 transaction
+        Txn {
+            payee: "Verizon".to_string(),
+            amount: USD::new_from_cents(6499),
+            date: d(2, 24),
+            notes: Some("monthly bill".to_string()),
+        },
+        // Wednesday - 0 transactions (skipped)
+        // Thursday - 4 transactions
+        Txn {
+            payee: "Ozakaya".to_string(),
+            amount: USD::new_from_cents(9686),
+            date: d(2, 26),
+            notes: None,
+        },
+        Txn {
+            payee: "Winner On 5th".to_string(),
+            amount: USD::new_from_cents(3850),
+            date: d(2, 26),
+            notes: None,
+        },
+        Txn {
+            payee: "Lemonade Insurance".to_string(),
+            amount: USD::new_from_cents(24817),
+            date: d(2, 26),
+            notes: Some("renters + pet".to_string()),
+        },
+        Txn {
+            payee: "Food Garden Market".to_string(),
+            amount: USD::new_from_cents(1553),
+            date: d(2, 26),
+            notes: None,
+        },
+        // Friday - 0 transactions (skipped)
+        // Saturday - 3 transactions
+        Txn {
+            payee: "Con Edison".to_string(),
+            amount: USD::new_from_cents(12521),
+            date: d(3, 1),
+            notes: Some("electric".to_string()),
+        },
+        Txn {
+            payee: "National Grid".to_string(),
+            amount: USD::new_from_cents(17413),
+            date: d(3, 1),
+            notes: Some("gas".to_string()),
+        },
+        Txn {
+            payee: "King David Tacos".to_string(),
+            amount: USD::new_from_cents(2724),
+            date: d(3, 1),
+            notes: None,
+        },
+        // Sunday - 1 transaction
+        Txn {
+            payee: "Doggieacademy".to_string(),
+            amount: USD::new_from_cents(13609),
+            date: d(3, 2),
+            notes: Some("daycare".to_string()),
         },
     ];
 
     let warnings = vec!["Test warning: could not find something".to_string()];
 
-    let total = USD::new_from_cents(10842);
+    let total = USD::new_from_cents(134219);
     equailizer::email::dev_print(&uuid::Uuid::new_v4().to_string(), txns, warnings, &total);
 }
 

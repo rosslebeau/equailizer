@@ -50,20 +50,23 @@ impl FilePersistence {
 
 impl Persistence for FilePersistence {
     fn save_batch(&self, batch: &Batch) -> Result<()> {
-        tracing::debug!(?batch, "saving batch");
+        tracing::debug!(?batch, "Batch data");
+        let file_path = self.data_path.join(format!("{}.json", batch.id));
 
         if self.dry_run {
+            tracing::info!(batch_id = %batch.id, path = %file_path.display(), "Dry run — skipping batch save");
             return Ok(());
         }
 
         let json = serde_json::to_string_pretty(batch)?;
-        let file_path = self.data_path.join(format!("{}.json", batch.id));
-        fs::write(file_path, json)?;
+        fs::write(&file_path, json)?;
+        tracing::info!(batch_id = %batch.id, path = %file_path.display(), "Batch saved");
         Ok(())
     }
 
     fn get_batch(&self, batch_name: &str) -> Result<Batch> {
         let file_path = self.data_path.join(format!("{}.json", batch_name));
+        tracing::debug!(batch_id = batch_name, path = %file_path.display(), "Loading batch");
         let file = fs::read_to_string(&file_path)
             .map_err(|e| anyhow::anyhow!("error reading batch file {}, {}", file_path.display(), e))?;
         let parsed: Batch = serde_json::from_str(&file)?;
