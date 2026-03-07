@@ -3,7 +3,7 @@ mod support;
 use equailizer::commands::reconcile::{
     build_creditor_splits, build_debtor_splits, find_settlement_transaction,
 };
-use equailizer::config::{Config, Creditor, Debtor, JMAP};
+use equailizer::config::{self, Config, Creditor, Debtor, JMAP};
 use equailizer::persist::{Batch, Settlement};
 use equailizer::usd::USD;
 use support::builders::{test_transaction, TransactionBuilder};
@@ -315,4 +315,61 @@ async fn reconcile_all_processes_unreconciled_batches() {
     let saved = persistence.saved_batches();
     let batch = saved.iter().find(|b| b.id == "unreconciled-1").unwrap();
     assert!(batch.reconciliation.is_some());
+}
+
+#[tokio::test]
+async fn reconcile_removes_pending_tag_from_batch_transactions() {
+    let config = test_config();
+    let pending_tag = config::TAG_PENDING_RECONCILIATION;
+
+    // Batch transactions have the eq-pending tag (as they would after create_batch)
+    let batch_txn_1 = test_transaction(10, 1500)
+        .with_payee("Store A")
+        .with_date(2025, 3, 1)
+        .with_tags(vec![(pending_tag, 50)]);
+    let batch_txn_2 = test_transaction(11, 2500)
+        .with_payee("Store B")
+        .with_date(2025, 3, 2)
+        .with_tags(vec![(pending_tag, 50), ("external-tag", 51)]);
+
+    let settlement_credit = test_transaction(50, -4000)
+        .with_account(1000)
+        .with_date(2025, 3, 5);
+    let settlement_debit = test_transaction(60, 4000)
+        .with_account(2000)
+        .with_date(2025, 3, 5);
+
+    let creditor_api =
+        MockLunchMoney::new(vec![batch_txn_1, batch_txn_2, settlement_credit]);
+    let debtor_api = MockLunchMoney::new(vec![settlement_debit]);
+
+    let batch = Batch {
+        id: "pending-tag-test".to_string(),
+        amount: USD::new_from_cents(4000),
+        transaction_ids: vec![10, 11],
+        reconciliation: None,
+    };
+    let persistence = InMemoryPersistence::with_batches(vec![batch]);
+
+    equailizer::commands::reconcile::reconcile_batch_name(
+        "pending-tag-test",
+        &config,
+        &creditor_api,
+        &debtor_api,
+        &persistence,
+    )
+    .await
+    .expect("reconcile should succeed");
+
+    // Verify update_transaction was called to remove the pending tag
+    let updates = creditor_api.updates_received.lock().unwrap();
+    assert_eq!(updates.len(), 2);
+
+    // First txn: had only eq-pending, should now have empty tags
+    assert_eq!(updates[0].0, 10);
+    assert_eq!(updates[0].1.tags, Some(vec![]));
+
+    // Second txn: had eq-pending + external-tag, should keep only external-tag
+    assert_eq!(updates[1].0, 11);
+    assert_eq!(updates[1].1.tags, Some(vec!["external-tag".to_string()]));
 }

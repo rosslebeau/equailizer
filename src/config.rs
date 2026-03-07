@@ -6,6 +6,7 @@ use crate::persist;
 
 pub const TAG_BATCH_SPLIT: &str = "eq-to-split";
 pub const TAG_BATCH_ADD: &str = "eq-to-batch";
+pub const TAG_PENDING_RECONCILIATION: &str = "eq-pending";
 
 #[derive(Debug, Deserialize)]
 pub struct Config {

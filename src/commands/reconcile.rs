@@ -1,8 +1,11 @@
 use crate::{
-    config::Config,
+    config::{self, Config},
     date_helpers,
     lunch_money::{
-        api::{update_transaction::SplitUpdateItem, LunchMoney},
+        api::{
+            update_transaction::{SplitUpdateItem, TransactionUpdateItem},
+            LunchMoney,
+        },
         model::transaction::Transaction,
     },
     persist::{Batch, Persistence, Settlement},
@@ -143,6 +146,9 @@ async fn reconcile_batch(
         .update_split((settlement_debit.id, debtor_splits))
         .await?;
 
+    // Remove the pending reconciliation tag from batch transactions.
+    remove_pending_tags(&batch_txns, creditor_api).await?;
+
     // Save batch so we know it's reconciled.
     persistence.save_batch(&Batch {
         id: batch.id.clone(),
@@ -206,4 +212,43 @@ pub fn build_debtor_splits(batch_txns: &[Transaction]) -> Vec<SplitUpdateItem> {
             date: Some(t.date),
         })
         .collect()
+}
+
+/// Remove the pending reconciliation tag from each batch transaction.
+async fn remove_pending_tags(
+    batch_txns: &[Transaction],
+    api: &(impl LunchMoney + Sync),
+) -> Result<()> {
+    let pending_tag = config::TAG_PENDING_RECONCILIATION;
+    let mut removed = 0u32;
+
+    for txn in batch_txns {
+        if !txn.tag_names().contains(&&pending_tag.to_string()) {
+            continue;
+        }
+
+        let tags: Vec<String> = txn
+            .tags
+            .iter()
+            .map(|t| t.name.clone())
+            .filter(|name| name != pending_tag)
+            .collect();
+
+        api.update_transaction((
+            txn.id,
+            TransactionUpdateItem {
+                payee: None,
+                category_id: None,
+                notes: None,
+                tags: Some(tags),
+                status: None,
+            },
+        ))
+        .await?;
+
+        removed += 1;
+    }
+
+    tracing::info!(removed, total = batch_txns.len(), "Removed pending reconciliation tags");
+    Ok(())
 }

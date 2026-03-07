@@ -1,7 +1,7 @@
 mod support;
 
 use equailizer::commands::create_batch::create_batch;
-use equailizer::config::{Config, Creditor, Debtor, JMAP};
+use equailizer::config::{self, Config, Creditor, Debtor, JMAP};
 use equailizer::usd::USD;
 use support::builders::{test_transaction, TransactionBuilder};
 use support::mocks::{InMemoryPersistence, MockLunchMoney, RecordingEmailSender};
@@ -71,8 +71,11 @@ async fn create_batch_with_add_tagged_transactions() {
     // First update should be for txn 1
     assert_eq!(updates[0].0, 1);
     assert_eq!(updates[0].1.category_id, Some(99)); // proxy category
+    // Pending reconciliation tag should be set
+    assert!(updates[0].1.tags.as_ref().unwrap().contains(&config::TAG_PENDING_RECONCILIATION.to_string()));
     // Second update should be for txn 2
     assert_eq!(updates[1].0, 2);
+    assert!(updates[1].1.tags.as_ref().unwrap().contains(&config::TAG_PENDING_RECONCILIATION.to_string()));
 
     // Verify email was sent
     assert_eq!(email.call_count(), 1);
@@ -115,6 +118,8 @@ async fn create_batch_with_split_tagged_transactions() {
     let splits = api.update_and_splits_received.lock().unwrap();
     assert_eq!(splits.len(), 1);
     assert_eq!(splits[0].0, 10); // original txn id
+    // Pending reconciliation tag should be set on the parent update
+    assert!(splits[0].1.tags.as_ref().unwrap().contains(&config::TAG_PENDING_RECONCILIATION.to_string()));
 
     // Verify email was sent
     assert_eq!(email.call_count(), 1);
