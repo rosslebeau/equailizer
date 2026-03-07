@@ -70,6 +70,10 @@ async fn reconcile_batch(
     debtor_api: &(impl LunchMoney + Sync),
     persistence: &(impl Persistence + Sync),
 ) -> Result<()> {
+    if batch.reconciliation.is_some() {
+        anyhow::bail!("batch '{}' is already reconciled", batch.id);
+    }
+
     let span = tracing::info_span!("Reconcile Batch", batch_id = %batch.id);
     let _enter = span.enter();
 

@@ -258,6 +258,36 @@ async fn reconcile_batch_end_to_end() {
 }
 
 #[tokio::test]
+async fn reconcile_fails_when_already_reconciled() {
+    let config = test_config();
+    let creditor_api = MockLunchMoney::new(vec![]);
+    let debtor_api = MockLunchMoney::new(vec![]);
+
+    let batch = Batch {
+        id: "already-done".to_string(),
+        amount: USD::new_from_cents(1500),
+        transaction_ids: vec![10],
+        reconciliation: Some(Settlement {
+            settlement_credit_id: 50,
+            settlement_debit_id: 60,
+        }),
+    };
+    let persistence = InMemoryPersistence::with_batches(vec![batch]);
+
+    let result = equailizer::commands::reconcile::reconcile_batch_name(
+        "already-done",
+        &config,
+        &creditor_api,
+        &debtor_api,
+        &persistence,
+    )
+    .await;
+
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("already reconciled"));
+}
+
+#[tokio::test]
 async fn reconcile_fails_when_no_settlement_credit() {
     let config = test_config();
 
