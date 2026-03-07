@@ -1,10 +1,11 @@
-use super::Client;
+use super::LunchMoneyClient;
 use crate::lunch_money::model::transaction::*;
 use crate::usd::USD;
-use crate::{config, lunch_money::model::transaction::TransactionId};
 use chrono::NaiveDate;
 use display_json::DebugAsJson;
 use serde::{Deserialize, Serialize};
+
+use anyhow::{Result, anyhow, bail};
 
 pub type TransactionUpdate = (TransactionId, TransactionUpdateItem);
 
@@ -58,130 +59,123 @@ pub struct SplitResponse {
     pub split_ids: Vec<TransactionId>,
 }
 
-impl Client {
-    pub async fn update_transaction(
-        &self,
-        txn_update: TransactionUpdate,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        self.update(txn_update.0, Action::Update(txn_update.1))
-            .await?;
-        Ok(())
+pub(super) async fn perform_update(
+    client: &LunchMoneyClient,
+    txn_update: TransactionUpdate,
+) -> Result<()> {
+    execute(client, txn_update.0, Action::Update(txn_update.1)).await?;
+    Ok(())
+}
+
+pub(super) async fn perform_split(
+    client: &LunchMoneyClient,
+    update: SplitUpdate,
+) -> Result<SplitResponse> {
+    execute(client, update.0, Action::Split(update.1))
+        .await?
+        .ok_or_else(|| anyhow!("no split ids found in transaction update that contained splits"))
+}
+
+pub(super) async fn perform_update_and_split(
+    client: &LunchMoneyClient,
+    update: TransactionAndSplitUpdate,
+) -> Result<SplitResponse> {
+    execute(client, update.0, Action::UpdateAndSplit(update.1, update.2))
+        .await?
+        .ok_or_else(|| anyhow!("no split ids found in transaction update that contained splits"))
+}
+
+// Returns Some(SplitResponse) if a split was performed, otherwise None.
+async fn execute(
+    client: &LunchMoneyClient,
+    txn_id: TransactionId,
+    action: Action,
+) -> Result<Option<SplitResponse>> {
+    #[derive(Debug, Deserialize)]
+    struct SuccessResponse {
+        updated: bool,
+        split: Option<Vec<TransactionId>>,
     }
 
-    pub async fn update_split(
-        &self,
-        update: SplitUpdate,
-    ) -> Result<SplitResponse, Box<dyn std::error::Error>> {
-        self.update(update.0, Action::Split(update.1))
-            .await?
-            .ok_or("no split ids found in transaction update that contained splits".into())
+    #[derive(Debug, Deserialize)]
+    struct ErrorResponse {
+        error: Vec<String>,
     }
 
-    pub async fn update_transaction_and_split(
-        &self,
-        update: TransactionAndSplitUpdate,
-    ) -> Result<SplitResponse, Box<dyn std::error::Error>> {
-        self.update(update.0, Action::UpdateAndSplit(update.1, update.2))
-            .await?
-            .ok_or("no split ids found in transaction update that contained splits".into())
+    #[derive(Debug, Deserialize)]
+    #[serde(untagged)]
+    enum Response {
+        Success(SuccessResponse),
+        Error(ErrorResponse),
     }
 
-    // TODO: Refactor txn_id into Action
-    // Returns Some(SplitResponse) if a split was performed, otherwise None.
-    // This is handled in a type-safe way by the public methods that call into this.
-    async fn update(
-        &self,
-        txn_id: TransactionId,
-        action: Action,
-    ) -> Result<Option<SplitResponse>, Box<dyn std::error::Error>> {
-        #[derive(Debug, Deserialize)]
-        struct SuccessResponse {
-            updated: bool,
-            split: Option<Vec<TransactionId>>,
-        }
+    #[derive(DebugAsJson, Serialize)]
+    struct RequestBodySource<'a> {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        transaction: Option<&'a TransactionUpdateItem>,
 
-        #[derive(Debug, Deserialize)]
-        struct ErrorResponse {
-            error: Vec<String>,
-        }
+        #[serde(skip_serializing_if = "Option::is_none")]
+        split: Option<&'a Vec<SplitUpdateItem>>,
+    }
 
-        #[derive(Debug, Deserialize)]
-        #[serde(untagged)]
-        enum Response {
-            Success(SuccessResponse),
-            Error(ErrorResponse),
-        }
+    let txn_update_body = match &action {
+        Action::Update(update) => RequestBodySource {
+            transaction: Some(update),
+            split: None,
+        },
+        Action::Split(splits) => RequestBodySource {
+            transaction: None,
+            split: Some(splits),
+        },
+        Action::UpdateAndSplit(update, splits) => RequestBodySource {
+            transaction: Some(update),
+            split: Some(splits),
+        },
+    };
 
-        #[derive(DebugAsJson, Serialize)]
-        struct RequestBodySource<'a> {
-            #[serde(skip_serializing_if = "Option::is_none")]
-            transaction: Option<&'a TransactionUpdateItem>,
+    tracing::debug!(txn_id, ?txn_update_body, "Updating transaction");
 
-            #[serde(skip_serializing_if = "Option::is_none")]
-            split: Option<&'a Vec<SplitUpdateItem>>,
-        }
+    if client.dry_run {
+        return Ok(Some(SplitResponse {
+            split_ids: vec![0, 1],
+        }));
+    }
 
-        let txn_update_body = match &action {
-            Action::Update(update) => RequestBodySource {
-                transaction: Some(update),
-                split: None,
-            },
-            Action::Split(splits) => RequestBodySource {
-                transaction: None,
-                split: Some(splits),
-            },
-            Action::UpdateAndSplit(update, splits) => RequestBodySource {
-                transaction: Some(update),
-                split: Some(splits),
-            },
-        };
+    let http = reqwest::Client::new();
+    let auth_header = format!("Bearer {}", client.auth_token);
+    let url = format!("https://dev.lunchmoney.app/v1/transactions/{}", txn_id);
+    let response = http
+        .put(url)
+        .header("Authorization", auth_header)
+        .json(&txn_update_body)
+        .send()
+        .await?;
 
-        tracing::debug!(txn_id, ?txn_update_body, "Updating transaction");
+    let http_code = response.status();
+    let response: Response = response.json().await?;
 
-        if config::is_dry_run() {
-            return Ok(Some(SplitResponse {
-                split_ids: vec![0, 1],
-            }));
-        }
+    tracing::debug!(
+        ?http_code,
+        ?response,
+        "Received transaction update response"
+    );
 
-        let client = reqwest::Client::new();
-        let auth_header = format!("Bearer {}", self.auth_token);
-        let url = format!("https://dev.lunchmoney.app/v1/transactions/{}", txn_id);
-        let response = client
-            .put(url)
-            .header("Authorization", auth_header)
-            .json(&txn_update_body)
-            .send()
-            .await?;
-
-        let http_code = response.status();
-        let response: Response = response.json().await?;
-
-        tracing::debug!(
-            ?http_code,
-            ?response,
-            "Received transaction update response"
-        );
-
-        match response {
-            Response::Success(s) => {
-                if s.updated {
-                    return Ok(s.split.map(|x| SplitResponse { split_ids: x }));
-                } else {
-                    return Err(format!("transaction not updated, no error given").into());
-                }
+    match response {
+        Response::Success(s) => {
+            if s.updated {
+                Ok(s.split.map(|x| SplitResponse { split_ids: x }))
+            } else {
+                bail!("transaction not updated, no error given")
             }
-            Response::Error(e) => {
-                return Err(e
-                    .error
+        }
+        Response::Error(e) => {
+            bail!(
+                "{}",
+                e.error
                     .first()
-                    .unwrap_or(&format!(
-                        "unspecified error with response code {}",
-                        http_code
-                    ))
-                    .to_owned()
-                    .into());
-            }
+                    .cloned()
+                    .unwrap_or_else(|| format!("unspecified error with response code {}", http_code))
+            )
         }
     }
 }

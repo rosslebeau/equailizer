@@ -1,6 +1,6 @@
 use crate::{
     commands::create_batch::Issue,
-    lunch_money::model::transaction::{Transaction, TransactionId},
+    lunch_money::model::transaction::Transaction,
 };
 
 #[derive(Debug, PartialEq)]

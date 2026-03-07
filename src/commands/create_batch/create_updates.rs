@@ -274,14 +274,14 @@ mod tests {
                     vec![
                         SplitUpdateItem {
                             amount: USD::new_from_cents(750),
-                            payee: None,
-                            category_id: None,
+                            payee: Some("Split1".to_string()),
+                            category_id: Some(42),
                             notes: None,
                             date: None,
                         },
                         SplitUpdateItem {
                             amount: USD::new_from_cents(750),
-                            payee: None,
+                            payee: Some("Split1".to_string()),
                             category_id: Some(proxy_category_id),
                             notes: None,
                             date: None,
@@ -303,14 +303,14 @@ mod tests {
                     vec![
                         SplitUpdateItem {
                             amount: USD::new_from_cents(600),
-                            payee: None,
-                            category_id: None,
+                            payee: Some("More Tags".to_string()),
+                            category_id: Some(42),
                             notes: None,
                             date: None,
                         },
                         SplitUpdateItem {
                             amount: USD::new_from_cents(600),
-                            payee: None,
+                            payee: Some("More Tags".to_string()),
                             category_id: Some(proxy_category_id),
                             notes: None,
                             date: None,

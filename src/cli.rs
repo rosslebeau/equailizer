@@ -1,6 +1,6 @@
-use crate::date_helpers;
+use equailizer::date_helpers;
 #[cfg(debug_assertions)]
-use crate::lunch_money::model::transaction::TransactionId;
+use equailizer::lunch_money::model::transaction::TransactionId;
 use chrono::NaiveDate;
 use clap::{ArgAction, Args, Parser, Subcommand};
 

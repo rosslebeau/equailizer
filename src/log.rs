@@ -1,9 +1,10 @@
+use anyhow::Result;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::filter::{LevelFilter, Targets};
 use tracing_subscriber::{fmt, layer::*, util::SubscriberInitExt};
 
-pub fn init_tracing() -> Result<WorkerGuard, Box<dyn std::error::Error>> {
-    let base_path = crate::persist::base_path()?;
+pub fn init_tracing() -> Result<WorkerGuard> {
+    let base_path = equailizer::persist::base_path()?;
     let file_appender = tracing_appender::rolling::daily(base_path, "eq.log");
     let (file_writer, guard) = tracing_appender::non_blocking(file_appender);
 
@@ -28,5 +29,5 @@ pub fn init_tracing() -> Result<WorkerGuard, Box<dyn std::error::Error>> {
         .with(file_layer)
         .init();
 
-    return Ok(guard);
+    Ok(guard)
 }

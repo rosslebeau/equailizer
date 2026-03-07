@@ -1,9 +1,8 @@
-use crate::{
-    config::{self, *},
-    date_helpers,
-    usd::USD,
-};
+use crate::date_helpers;
+use crate::usd::USD;
+use anyhow::Result;
 use askama::Template;
+use async_trait::async_trait;
 use chrono::NaiveDate;
 use jmap_client::{client::Client, core::response::MethodResponse::*, email::EmailBodyPart};
 use std::collections::HashMap;
@@ -17,220 +16,245 @@ pub struct Txn {
     pub notes: Option<String>,
 }
 
-fn venmo_request_link(venmo_username: &String, text: &String, amount: &USD) -> String {
+#[async_trait]
+pub trait EmailSender: Send + Sync {
+    async fn send_batch_emails(
+        &self,
+        batch_id: &str,
+        total: &USD,
+        txns: &[Txn],
+        warnings: Vec<String>,
+    ) -> Result<()>;
+}
+
+pub struct JmapEmailSender {
+    pub api_session_endpoint: String,
+    pub api_key: String,
+    pub sent_mailbox: String,
+    pub sending_address: String,
+    pub creditor_email: String,
+    pub debtor_email: String,
+    pub debtor_venmo_username: String,
+    pub dry_run: bool,
+}
+
+#[async_trait]
+impl EmailSender for JmapEmailSender {
+    async fn send_batch_emails(
+        &self,
+        batch_id: &str,
+        total: &USD,
+        txns: &[Txn],
+        warnings: Vec<String>,
+    ) -> Result<()> {
+        let client = jmap_client::client::Client::new()
+            .credentials(self.api_key.clone())
+            .connect(&self.api_session_endpoint)
+            .await?;
+
+        let mut identity_req = client.build();
+        let identity_get_req = identity_req.get_identity();
+        identity_get_req.account_id(client.default_account_id());
+        identity_req.using.push(jmap_client::URI::Submission);
+
+        let sending_identity = identity_req
+            .send()
+            .await?
+            .pop_method_response()
+            .ok_or_else(|| anyhow::anyhow!("get identity response missing"))?
+            .unwrap_get_identity()?
+            .list()
+            .iter()
+            .filter_map(|x| {
+                if x.email()? == self.sending_address
+                    && let Some(sending_id) = x.id()
+                {
+                    Some(sending_id.to_string())
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<String>>()
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("no identity matching config's sending address"))?
+            .clone();
+
+        self.send_creditor_email(
+            &client,
+            &sending_identity,
+            batch_id,
+            total,
+            txns,
+            warnings,
+        )
+        .await?;
+
+        self.send_debtor_email(&client, &sending_identity, batch_id, total, txns)
+            .await?;
+
+        Ok(())
+    }
+}
+
+impl JmapEmailSender {
+    async fn send_creditor_email(
+        &self,
+        client: &Client,
+        sending_identity: &str,
+        batch_id: &str,
+        total: &USD,
+        txns: &[Txn],
+        warnings: Vec<String>,
+    ) -> Result<()> {
+        tracing::debug!(
+            self.sending_address,
+            self.creditor_email,
+            "Sending creditor email"
+        );
+
+        if self.dry_run {
+            return Ok(());
+        }
+
+        let mut email_req = client.build();
+        let email_set_req = email_req.set_email();
+
+        let email = email_set_req.create_with_id("m0");
+        email.from([self.sending_address.clone()]);
+        email.to([self.creditor_email.clone()]);
+        email.subject("Quail alert! Batch ready from equailizer");
+        email.mailbox_ids([&self.sent_mailbox]);
+
+        let venmo_text = format!("equailizer_{}", date_helpers::now_date_naive_eastern());
+        let venmo_request_link =
+            venmo_request_link(&self.debtor_venmo_username, &venmo_text, total);
+
+        let text_body_id = EmailBodyPart::new().part_id("t1");
+        email.body_value(
+            "t1".to_string(),
+            format!(
+                "New batch ready!\n\nClick here to initiate Venmo request: {}\n\nbatch id: {}",
+                venmo_request_link, batch_id
+            ),
+        );
+        email.text_body(text_body_id);
+
+        let html_body_id = EmailBodyPart::new().part_id("t2");
+        let html_text = make_creditor_email_html_string(
+            txns,
+            &venmo_request_link,
+            warnings,
+            &batch_id.to_string(),
+            total,
+        );
+        email.body_value("t2".to_string(), html_text);
+        email.html_body(html_body_id);
+
+        let email_response = match email_req.send().await?.pop_method_response() {
+            Some(res) => res.unwrap_method_response(),
+            None => {
+                return Err(
+                    anyhow::anyhow!("JMAP create email response did not contain any methodResponses")
+                );
+            }
+        };
+
+        let email_id = match email_response {
+            SetEmail(mut es) => es
+                .created("m0")?
+                .id()
+                .ok_or_else(|| anyhow::anyhow!("didn't find email submission id in response"))?
+                .to_string(),
+            _ => return Err(anyhow::anyhow!("JMAP create email response was not of type SetEmail")),
+        };
+
+        client
+            .email_submission_create(email_id, sending_identity.to_string())
+            .await?;
+
+        tracing::debug!(
+            self.sending_address,
+            self.creditor_email,
+            "creditor email sent"
+        );
+
+        Ok(())
+    }
+
+    async fn send_debtor_email(
+        &self,
+        client: &Client,
+        sending_identity: &str,
+        batch_id: &str,
+        total: &USD,
+        txns: &[Txn],
+    ) -> Result<()> {
+        if self.dry_run {
+            return Ok(());
+        }
+
+        let mut email_req = client.build();
+        let email_set_req = email_req.set_email();
+
+        let email = email_set_req.create_with_id("m0");
+        email.from([self.sending_address.clone()]);
+        email.to([self.debtor_email.clone()]);
+        email.subject("Quail alert! Batch incoming from equailizer");
+        email.mailbox_ids([&self.sent_mailbox]);
+
+        let text_body_id = EmailBodyPart::new().part_id("t1");
+        email.body_value(
+            "t1".to_string(),
+            format!(
+                "New batch incoming! You'll see a venmo request for it soon.\n\nbatch id: {}",
+                batch_id
+            ),
+        );
+        email.text_body(text_body_id);
+
+        let html_body_id = EmailBodyPart::new().part_id("t2");
+        let html_text =
+            make_debtor_email_html_string(txns, &batch_id.to_string(), total);
+        email.body_value("t2".to_string(), html_text);
+        email.html_body(html_body_id);
+
+        let email_response = match email_req.send().await?.pop_method_response() {
+            Some(res) => res.unwrap_method_response(),
+            None => {
+                return Err(
+                    anyhow::anyhow!("JMAP create email response did not contain any methodResponses")
+                );
+            }
+        };
+
+        let email_id = match email_response {
+            SetEmail(mut es) => es
+                .created("m0")?
+                .id()
+                .ok_or_else(|| anyhow::anyhow!("didn't find email submission id in response"))?
+                .to_string(),
+            _ => return Err(anyhow::anyhow!("JMAP create email response was not of type SetEmail")),
+        };
+
+        client
+            .email_submission_create(email_id, sending_identity.to_string())
+            .await?;
+
+        tracing::debug!(
+            self.sending_address,
+            self.debtor_email,
+            "debtor email sent"
+        );
+
+        Ok(())
+    }
+}
+
+fn venmo_request_link(venmo_username: &str, text: &str, amount: &USD) -> String {
     format!(
         "https://venmo.com/{}?txn=charge&note={}&amount={}",
         venmo_username, text, amount
     )
-}
-
-pub async fn send_emails(
-    batch_id: &String,
-    total: &USD,
-    txns: Vec<Txn>,
-    warnings: Vec<String>,
-    config: &Config,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let client = jmap_client::client::Client::new()
-        .credentials(config.jmap.api_key.clone())
-        .connect(&config.jmap.api_session_endpoint)
-        .await?;
-
-    let mut identity_req = client.build();
-    let identity_get_req = identity_req.get_identity();
-    identity_get_req.account_id(client.default_account_id());
-    identity_req.using.push(jmap_client::URI::Submission);
-
-    let identity_response_missing_err: Box<dyn std::error::Error> =
-        Box::from("get identity response missing");
-    let no_matching_identity_err: Box<dyn std::error::Error> =
-        Box::from("no identity matching config's sending address");
-
-    let sending_identity = identity_req
-        .send()
-        .await?
-        .pop_method_response()
-        .ok_or(identity_response_missing_err)?
-        .unwrap_get_identity()?
-        .list()
-        .iter()
-        .filter_map(|x| {
-            if x.email()? == config.jmap.sending_address
-                && let Some(sending_id) = x.id()
-            {
-                Some(sending_id.to_string())
-            } else {
-                None
-            }
-        })
-        .collect::<Vec<String>>()
-        .first()
-        .ok_or(no_matching_identity_err)?
-        .clone();
-
-    send_creditor_email(
-        &client,
-        config.jmap.sending_address.clone(),
-        sending_identity.clone(),
-        config.jmap.sent_mailbox.clone(),
-        config.creditor.email_address.clone(),
-        config.debtor.venmo_username.clone(),
-        batch_id,
-        total,
-        &txns,
-        warnings,
-    )
-    .await?;
-
-    send_debtor_email(
-        &client,
-        config.jmap.sending_address.clone(),
-        sending_identity.clone(),
-        config.jmap.sent_mailbox.clone(),
-        config.debtor.email_address.clone(),
-        batch_id,
-        total,
-        &txns,
-    )
-    .await?;
-
-    Ok(())
-}
-
-async fn send_creditor_email(
-    client: &Client,
-    sending_address: String,
-    sending_identity: String,
-    sent_mailbox: String,
-    creditor_address: String,
-    debtor_venmo_username: String,
-    batch_id: &String,
-    total: &USD,
-    txns: &Vec<Txn>,
-    warnings: Vec<String>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    tracing::debug!(sending_address, creditor_address, "Sending creditor email");
-
-    if config::is_dry_run() {
-        return Ok(());
-    }
-
-    let mut email_req = client.build();
-    let email_set_req = email_req.set_email();
-
-    let email = email_set_req.create_with_id("m0");
-    email.from([sending_address.clone()]);
-    email.to([creditor_address.clone()]);
-    email.subject("Quail alert! Batch ready from equailizer");
-    email.mailbox_ids([&sent_mailbox]);
-
-    let venmo_text = format!("equailizer_{}", date_helpers::now_date_naive_eastern());
-    let venmo_request_link = venmo_request_link(&debtor_venmo_username, &venmo_text, total);
-
-    let text_body_id = EmailBodyPart::new().part_id("t1");
-    email.body_value(
-        "t1".to_string(),
-        format!(
-            "New batch ready!\n\nClick here to initiate Venmo request: {}\n\nbatch id: {}",
-            venmo_request_link, batch_id
-        ),
-    );
-    email.text_body(text_body_id);
-
-    let html_body_id = EmailBodyPart::new().part_id("t2");
-    let html_text =
-        make_creditor_email_html_string(txns, &venmo_request_link, warnings, batch_id, total);
-    email.body_value("t2".to_string(), html_text);
-    email.html_body(html_body_id);
-
-    let email_response = match email_req.send().await?.pop_method_response() {
-        Some(res) => res.unwrap_method_response(),
-        None => {
-            return Err("JMAP create email response did not contain any methodResponses".into());
-        }
-    };
-
-    let no_id_err: Box<dyn std::error::Error> =
-        Box::from("didn't find email submission id in response");
-    let email_id = match email_response {
-        SetEmail(mut es) => es.created("m0")?.id().ok_or(no_id_err)?.to_string(),
-        _ => return Err("JMAP create email response was not of type SetEmail".into()),
-    };
-
-    client
-        .email_submission_create(email_id, sending_identity)
-        .await?;
-
-    tracing::debug!(sending_address, creditor_address, "creditor email sent");
-
-    Ok(())
-}
-
-async fn send_debtor_email(
-    client: &Client,
-    sending_address: String,
-    sending_identity: String,
-    sent_mailbox: String,
-    debtor_address: String,
-    batch_id: &String,
-    total: &USD,
-    txns: &Vec<Txn>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    // tracing::debug!(
-    //     config.jmap.sending_address,
-    //     config.creditor.email_address,
-    //     "Sending debtor email"
-    // );
-
-    if config::is_dry_run() {
-        return Ok(());
-    }
-
-    let mut email_req = client.build();
-    let email_set_req = email_req.set_email();
-
-    let email = email_set_req.create_with_id("m0");
-    email.from([sending_address.clone()]);
-    email.to([debtor_address.clone()]);
-    email.subject("Quail alert! Batch incoming from equailizer");
-    email.mailbox_ids([&sent_mailbox]);
-
-    let text_body_id = EmailBodyPart::new().part_id("t1");
-    email.body_value(
-        "t1".to_string(),
-        format!(
-            "New batch incoming! You'll see a venmo request for it soon.\n\nbatch id: {}",
-            batch_id
-        ),
-    );
-    email.text_body(text_body_id);
-
-    let html_body_id = EmailBodyPart::new().part_id("t2");
-    let html_text = make_debtor_email_html_string(txns, batch_id, total);
-    email.body_value("t2".to_string(), html_text);
-    email.html_body(html_body_id);
-
-    let email_response = match email_req.send().await?.pop_method_response() {
-        Some(res) => res.unwrap_method_response(),
-        None => {
-            return Err("JMAP create email response did not contain any methodResponses".into());
-        }
-    };
-
-    let no_id_err: Box<dyn std::error::Error> =
-        Box::from("didn't find email submission id in response");
-    let email_id = match email_response {
-        SetEmail(mut es) => es.created("m0")?.id().ok_or(no_id_err)?.to_string(),
-        _ => return Err("JMAP create email response was not of type SetEmail".into()),
-    };
-
-    client
-        .email_submission_create(email_id, sending_identity)
-        .await?;
-
-    tracing::debug!(sending_address, debtor_address, "debtor email sent");
-
-    Ok(())
 }
 
 #[derive(Template)]
@@ -244,14 +268,14 @@ struct BatchReadyEmailTemplate<'a> {
 }
 
 pub fn make_creditor_email_html_string(
-    txns: &Vec<Txn>,
+    txns: &[Txn],
     venmo_request_link: &String,
     warnings: Vec<String>,
     batch_id: &String,
     total: &USD,
 ) -> String {
     let txns_by_date: HashMap<String, Vec<&Txn>> =
-        txns.into_iter()
+        txns.iter()
             .fold(HashMap::<String, Vec<&Txn>>::new(), |mut acc, txn| {
                 acc.entry(txn.date.format("%b %d, %Y").to_string())
                     .or_insert_with(Vec::new)
@@ -260,14 +284,14 @@ pub fn make_creditor_email_html_string(
             });
 
     let email = BatchReadyEmailTemplate {
-        txns_by_date: txns_by_date,
-        venmo_request_link: venmo_request_link,
-        warnings: warnings,
-        batch_id: batch_id,
-        total: total,
+        txns_by_date,
+        venmo_request_link,
+        warnings,
+        batch_id,
+        total,
     };
 
-    return email.render().unwrap();
+    email.render().unwrap()
 }
 
 #[derive(Template)]
@@ -278,9 +302,9 @@ struct BatchReadyDebtorEmailTemplate<'a> {
     total: &'a USD,
 }
 
-pub fn make_debtor_email_html_string(txns: &Vec<Txn>, batch_id: &String, total: &USD) -> String {
+pub fn make_debtor_email_html_string(txns: &[Txn], batch_id: &String, total: &USD) -> String {
     let txns_by_date: HashMap<String, Vec<&Txn>> =
-        txns.into_iter()
+        txns.iter()
             .fold(HashMap::<String, Vec<&Txn>>::new(), |mut acc, txn| {
                 acc.entry(txn.date.format("%b %d, %Y").to_string())
                     .or_insert_with(Vec::new)
@@ -289,12 +313,12 @@ pub fn make_debtor_email_html_string(txns: &Vec<Txn>, batch_id: &String, total: 
             });
 
     let email = BatchReadyDebtorEmailTemplate {
-        txns_by_date: txns_by_date,
-        batch_id: batch_id,
-        total: total,
+        txns_by_date,
+        batch_id,
+        total,
     };
 
-    return email.render().unwrap();
+    email.render().unwrap()
 }
 
 #[cfg(debug_assertions)]

@@ -1,27 +1,20 @@
 mod create_updates;
 mod process_tags;
 
-use std::collections::HashMap;
-
 use crate::commands::create_batch::create_updates::create_updates;
 use crate::commands::create_batch::process_tags::process_tags;
-use crate::config::{self, *};
-use crate::email::{self, Txn};
+use crate::config;
+use crate::email::{EmailSender, Txn};
 use crate::lunch_money::api::update_transaction::{
-    TransactionAndSplitUpdate, TransactionUpdate, TransactionUpdateItem,
+    TransactionAndSplitUpdate, TransactionUpdate,
 };
-use crate::lunch_money::model::transaction;
-use crate::persist::Batch;
+use crate::lunch_money::api::LunchMoney;
+use crate::lunch_money::model::transaction::TransactionId;
+use crate::persist::{Batch, Persistence};
 use crate::usd::USD;
-use crate::{
-    lunch_money, lunch_money::api::Client, lunch_money::api::update_transaction,
-    lunch_money::api::update_transaction::SplitUpdateItem,
-    lunch_money::model::transaction::TransactionId, lunch_money::model::transaction::*, persist,
-};
+use anyhow::Result;
 use chrono::NaiveDate;
-use rand::random_bool;
-use rust_decimal::prelude::*;
-use uuid::{self, Uuid};
+use uuid::Uuid;
 
 #[derive(Debug, PartialEq)]
 pub enum Issue {
@@ -34,28 +27,25 @@ pub enum Issue {
 pub async fn create_batch(
     start_date: NaiveDate,
     end_date: NaiveDate,
-    profile: &String,
-    config: &Config,
-) -> Result<(), Box<dyn std::error::Error>> {
+    config: &config::Config,
+    api: &(impl LunchMoney + Sync),
+    persistence: &(impl Persistence + Sync),
+    email: &(impl EmailSender + Sync),
+) -> Result<()> {
     let span = tracing::info_span!("Create Batch");
     let _enter = span.enter();
     tracing::debug!("Starting");
 
     if start_date.cmp(&end_date) == std::cmp::Ordering::Greater {
-        return Err("start date cannot be after end date".into());
+        anyhow::bail!("start date cannot be after end date");
     }
 
     // Get all transactions in provided date range.
-    let creditor_client = Client {
-        auth_token: config.creditor.api_key.to_owned(),
-    };
-    let txns = creditor_client
-        .get_transactions(start_date, end_date)
-        .await?;
+    let txns = api.get_transactions(start_date, end_date).await?;
 
     // Process tags on the retrieved transactions to see what should be
     // added to the batch.
-    let processed = process_tags(
+    let mut processed = process_tags(
         txns,
         &config::TAG_BATCH_ADD.to_string(),
         &config::TAG_BATCH_SPLIT.to_string(),
@@ -67,17 +57,19 @@ pub async fn create_batch(
         return Ok(());
     }
 
+    // Capture tag-processing issues before consuming the processed data.
+    let mut issues: Vec<Issue> = processed.issues.drain(..).collect();
+
     // Create actionable updates for the processed results.
     let (add_updates, split_updates) = create_updates(processed, config.creditor.proxy_category_id);
 
     // Prepare final output data.
     let mut batched_txn_info: Vec<(TransactionId, Txn)> = vec![];
-    let mut issues: Vec<Issue> = vec![];
 
     // Execute adds and append results to output.
     {
         let (mut added_ids_and_email_txns, mut added_issues) =
-            execute_adds(add_updates, &creditor_client).await;
+            execute_adds(add_updates, api).await;
         batched_txn_info.append(&mut added_ids_and_email_txns);
         issues.append(&mut added_issues);
     }
@@ -85,7 +77,7 @@ pub async fn create_batch(
     // Execute splits and append results to output.
     {
         let (mut added_ids_and_email_txns, mut added_issues) =
-            execute_splits(split_updates, &creditor_client).await;
+            execute_splits(split_updates, api).await;
         batched_txn_info.append(&mut added_ids_and_email_txns);
         issues.append(&mut added_issues);
     }
@@ -98,7 +90,7 @@ pub async fn create_batch(
                 let tot = amt + x.1.amount;
                 ids.push(x.0);
                 txns.push(x.1);
-                return (ids, txns, tot);
+                (ids, txns, tot)
             },
         );
 
@@ -111,11 +103,13 @@ pub async fn create_batch(
         transaction_ids: batched_ids,
         reconciliation: None,
     };
-    persist::save_batch(&batch, profile)?;
+    persistence.save_batch(&batch)?;
 
     // Send the batch notification email.
     let email_warnings: Vec<String> = issues.iter().map(|i| text_for_issue(i)).collect();
-    email::send_emails(&batch_id, &total_amount, email_txns, email_warnings, config).await?;
+    email
+        .send_batch_emails(&batch_id, &total_amount, &email_txns, email_warnings)
+        .await?;
 
     tracing::debug!(amount = ?total_amount, batch_id, "Finished creating batch");
     Ok(())
@@ -124,14 +118,14 @@ pub async fn create_batch(
 // Execute adding these transactions to the batch with their associated pre-prepared update.
 // Return info about the added transactions and any issues encountered during the operation.
 async fn execute_adds(
-    txns_and_updates: Vec<(Transaction, TransactionUpdate)>,
-    client: &Client,
+    txns_and_updates: Vec<(crate::lunch_money::model::transaction::Transaction, TransactionUpdate)>,
+    api: &(impl LunchMoney + Sync),
 ) -> (Vec<(TransactionId, Txn)>, Vec<Issue>) {
     let mut batched_txn_info: Vec<(TransactionId, Txn)> = vec![];
     let mut issues: Vec<Issue> = vec![];
 
     for (txn, update) in txns_and_updates {
-        let result = client.update_transaction(update).await;
+        let result = api.update_transaction(update).await;
         match result {
             Ok(_) => {
                 batched_txn_info.push((
@@ -150,16 +144,18 @@ async fn execute_adds(
         }
     }
 
-    return (batched_txn_info, issues);
+    (batched_txn_info, issues)
 }
 
 // Execute splitting and adding these transactions to the batch with their associated pre-prepared update.
-// Return info about the added transactions and any issues encountered during the operation.
 // Returns info about the transactions added to the batch - i.e. after splitting,
 // return the debtor's split txn info
 async fn execute_splits(
-    txns_and_updates: Vec<(Transaction, TransactionAndSplitUpdate)>,
-    client: &Client,
+    txns_and_updates: Vec<(
+        crate::lunch_money::model::transaction::Transaction,
+        TransactionAndSplitUpdate,
+    )>,
+    api: &(impl LunchMoney + Sync),
 ) -> (Vec<(TransactionId, Txn)>, Vec<Issue>) {
     let mut batched_txn_info: Vec<(TransactionId, Txn)> = vec![];
     let mut issues: Vec<Issue> = vec![];
@@ -172,7 +168,7 @@ async fn execute_splits(
             .expect("split update contained fewer than 2 split items")
             .amount;
 
-        let result = client.update_transaction_and_split(update).await;
+        let result = api.update_transaction_and_split(update).await;
 
         match result {
             Ok(split_response) => {
@@ -199,7 +195,7 @@ async fn execute_splits(
         }
     }
 
-    return (batched_txn_info, issues);
+    (batched_txn_info, issues)
 }
 
 fn text_for_issue(issue: &Issue) -> String {
@@ -219,22 +215,5 @@ fn text_for_issue(issue: &Issue) -> String {
         Issue::TransactionUpdateError(txn, e_str) => {
             format!("Error when updating transaction {}: {}", txn, e_str)
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use chrono::NaiveDate;
-
-    use super::*;
-
-    #[test]
-    fn test_execute_adds() {
-        // Need a way to inject a test Client to test execute_adds
-    }
-
-    #[test]
-    fn test_execute_splits() {
-        // Need a way to inject a test Client to test execute_splits
     }
 }
