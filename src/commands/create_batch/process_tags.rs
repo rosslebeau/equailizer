@@ -1,7 +1,4 @@
-use crate::{
-    commands::create_batch::Issue,
-    lunch_money::model::transaction::Transaction,
-};
+use crate::{issue::Issue, lunch_money::model::transaction::Transaction};
 
 #[derive(Debug, PartialEq)]
 pub struct ProcessTagsOutput {

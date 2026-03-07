@@ -5,6 +5,7 @@ use crate::commands::create_batch::create_updates::{create_resplit_items, create
 use crate::commands::create_batch::process_tags::process_tags;
 use crate::config;
 use crate::email::{EmailSender, Txn};
+use crate::issue::Issue;
 use crate::lunch_money::api::update_transaction::{
     TransactionAndSplitUpdate, TransactionUpdate,
 };
@@ -16,13 +17,6 @@ use anyhow::Result;
 use chrono::NaiveDate;
 use std::collections::HashMap;
 use uuid::Uuid;
-
-#[derive(Debug, PartialEq)]
-pub enum Issue {
-    AddTagHasChildren(TransactionId),
-    SplitTagHasChildren(TransactionId),
-    TransactionUpdateError(TransactionId, String),
-}
 
 pub async fn create_batch(
     start_date: NaiveDate,
@@ -77,7 +71,7 @@ pub async fn create_batch(
     // Capture tag-processing issues before consuming the processed data.
     let mut issues: Vec<Issue> = processed.issues.drain(..).collect();
     for issue in &issues {
-        tracing::warn!("{}", text_for_issue(issue));
+        tracing::warn!("{}", issue);
     }
 
     // Extract resplit transactions before create_updates consumes the rest.
@@ -137,7 +131,7 @@ pub async fn create_batch(
     persistence.save_batch(&batch)?;
 
     // Send the batch notification email.
-    let email_warnings: Vec<String> = issues.iter().map(|i| text_for_issue(i)).collect();
+    let email_warnings: Vec<String> = issues.iter().map(|i| i.to_string()).collect();
     email
         .send_batch_emails(&batch_id, &total_amount, &email_txns, email_warnings)
         .await?;
@@ -322,18 +316,3 @@ async fn execute_resplits(
     (batched_txn_info, issues)
 }
 
-fn text_for_issue(issue: &Issue) -> String {
-    match issue {
-        Issue::AddTagHasChildren(txn) => format!(
-            "Transaction was tagged for batch, but it has children: {}",
-            txn
-        ),
-        Issue::SplitTagHasChildren(txn) => format!(
-            "Transaction was tagged to split, but it already has children: {}",
-            txn
-        ),
-        Issue::TransactionUpdateError(txn, e_str) => {
-            format!("Error when updating transaction {}: {}", txn, e_str)
-        }
-    }
-}
