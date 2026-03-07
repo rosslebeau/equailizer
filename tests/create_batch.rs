@@ -231,6 +231,77 @@ async fn create_batch_issues_warning_for_add_with_children() {
 }
 
 #[tokio::test]
+async fn create_batch_issues_warning_for_split_with_children() {
+    let config = test_config();
+    let txns = vec![
+        test_transaction(1, 1500)
+            .with_tags(vec![("eq-to-batch", 10)])
+            .with_date(2025, 8, 1)
+            .with_payee("Valid"),
+        test_transaction(2, 2000)
+            .with_tags(vec![("eq-to-split", 11)])
+            .with_children(), // has children, should produce warning
+    ];
+
+    let api = MockLunchMoney::new(txns);
+    let persistence = InMemoryPersistence::new();
+    let email = RecordingEmailSender::new();
+
+    let start = chrono::NaiveDate::from_ymd_opt(2025, 8, 1).unwrap();
+    let end = chrono::NaiveDate::from_ymd_opt(2025, 8, 31).unwrap();
+
+    create_batch(start, end, &config, &api, &persistence, &email)
+        .await
+        .expect("create_batch should succeed");
+
+    // Only the valid txn should be in the batch
+    let batches = persistence.saved_batches();
+    assert_eq!(batches.len(), 1);
+    assert_eq!(batches[0].amount, USD::new_from_cents(1500));
+
+    // Warning should be included in email
+    let calls = email.calls.lock().unwrap();
+    assert_eq!(calls[0].warnings.len(), 1);
+    assert!(calls[0].warnings[0].contains("already has children"));
+}
+
+#[tokio::test]
+async fn create_batch_issues_warning_for_update_error() {
+    let config = test_config();
+    let txns = vec![
+        test_transaction(1, 1500)
+            .with_tags(vec![("eq-to-batch", 10)])
+            .with_date(2025, 8, 1)
+            .with_payee("Valid"),
+        test_transaction(2, 2000)
+            .with_tags(vec![("eq-to-batch", 10)])
+            .with_date(2025, 8, 2)
+            .with_payee("Will Fail"),
+    ];
+
+    let api = MockLunchMoney::new(txns).with_failing_updates(vec![2]);
+    let persistence = InMemoryPersistence::new();
+    let email = RecordingEmailSender::new();
+
+    let start = chrono::NaiveDate::from_ymd_opt(2025, 8, 1).unwrap();
+    let end = chrono::NaiveDate::from_ymd_opt(2025, 8, 31).unwrap();
+
+    create_batch(start, end, &config, &api, &persistence, &email)
+        .await
+        .expect("create_batch should succeed");
+
+    // Only the successful txn should be in the batch
+    let batches = persistence.saved_batches();
+    assert_eq!(batches.len(), 1);
+    assert_eq!(batches[0].amount, USD::new_from_cents(1500));
+
+    // Warning about the update error should be included in email
+    let calls = email.calls.lock().unwrap();
+    assert_eq!(calls[0].warnings.len(), 1);
+    assert!(calls[0].warnings[0].contains("Error when updating transaction 2"));
+}
+
+#[tokio::test]
 async fn create_batch_mixed_add_and_split() {
     let config = test_config();
     let txns = vec![

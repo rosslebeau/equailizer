@@ -21,6 +21,7 @@ use equailizer::email::{EmailSender, Txn};
 pub struct MockLunchMoney {
     pub transactions: Vec<Transaction>,
     pub next_split_ids: Mutex<Vec<Vec<TransactionId>>>,
+    pub fail_update_for_ids: Mutex<Vec<TransactionId>>,
     pub updates_received: Mutex<Vec<TransactionUpdate>>,
     pub splits_received: Mutex<Vec<SplitUpdate>>,
     pub update_and_splits_received: Mutex<Vec<TransactionAndSplitUpdate>>,
@@ -31,6 +32,7 @@ impl MockLunchMoney {
         Self {
             transactions,
             next_split_ids: Mutex::new(vec![]),
+            fail_update_for_ids: Mutex::new(vec![]),
             updates_received: Mutex::new(vec![]),
             splits_received: Mutex::new(vec![]),
             update_and_splits_received: Mutex::new(vec![]),
@@ -40,6 +42,12 @@ impl MockLunchMoney {
     /// Set the split IDs that will be returned by successive split/update_and_split calls.
     pub fn with_split_ids(self, split_ids: Vec<Vec<TransactionId>>) -> Self {
         *self.next_split_ids.lock().unwrap() = split_ids;
+        self
+    }
+
+    /// Make `update_transaction` return an error for the given transaction IDs.
+    pub fn with_failing_updates(self, ids: Vec<TransactionId>) -> Self {
+        *self.fail_update_for_ids.lock().unwrap() = ids;
         self
     }
 }
@@ -71,7 +79,11 @@ impl LunchMoney for MockLunchMoney {
     }
 
     async fn update_transaction(&self, update: TransactionUpdate) -> Result<()> {
+        let should_fail = self.fail_update_for_ids.lock().unwrap().contains(&update.0);
         self.updates_received.lock().unwrap().push(update);
+        if should_fail {
+            anyhow::bail!("mock update failure");
+        }
         Ok(())
     }
 
