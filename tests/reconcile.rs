@@ -238,15 +238,13 @@ async fn reconcile_batch_end_to_end() {
     assert_eq!(creditor_clears[2].0, 101);
 
     let debtor_updates = debtor_api.updates_received.lock().unwrap();
-    // Settlement parent (60) + 2 children (100, 101)
+    // Settlement parent only — split children left uncleared for debtor to categorize
     let debtor_clears: Vec<_> = debtor_updates
         .iter()
         .filter(|(_, u)| cleared(u))
         .collect();
-    assert_eq!(debtor_clears.len(), 3);
+    assert_eq!(debtor_clears.len(), 1);
     assert_eq!(debtor_clears[0].0, 60);
-    assert_eq!(debtor_clears[1].0, 100);
-    assert_eq!(debtor_clears[2].0, 101);
 
     // Verify batch was saved with settlement info
     let saved = persistence.saved_batches();

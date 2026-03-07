@@ -154,15 +154,16 @@ async fn reconcile_batch(
 
     // Split out the debtor's side to match the transactions in the batch.
     let debtor_splits = build_debtor_splits(&batch_txns);
-    let debtor_split_response = debtor_api
+    debtor_api
         .update_split((settlement_debit.id, debtor_splits))
         .await?;
 
-    // Clear settlement parents and all split children.
+    // Clear creditor settlement parent and split children.
     clear_transactions(&[settlement_credit.id], creditor_api).await?;
     clear_transactions(&creditor_split_response.split_ids, creditor_api).await?;
+    // Clear only the debtor settlement parent — leave split children uncleared
+    // so the debtor can categorize them.
     clear_transactions(&[settlement_debit.id], debtor_api).await?;
-    clear_transactions(&debtor_split_response.split_ids, debtor_api).await?;
 
     // Remove the pending reconciliation tag from batch transactions.
     remove_pending_tags(&batch_txns, creditor_api).await?;
