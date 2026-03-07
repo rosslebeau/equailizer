@@ -113,6 +113,58 @@ fn create_splits(
     return (creditor_split, debtor_split);
 }
 
+/// Build split items for re-splitting a parent whose child was tagged eq-to-split.
+///
+/// The returned split items are ordered as:
+/// [tagged1_creditor, tagged1_debtor, tagged2_creditor, tagged2_debtor, ..., sibling1, sibling2, ...]
+///
+/// The returned `Vec<USD>` contains the debtor half amount for each tagged child, in order.
+pub fn create_resplit_items(
+    tagged_children: &[Transaction],
+    siblings: &[Transaction],
+    proxy_category_id: u32,
+) -> (Vec<SplitUpdateItem>, Vec<USD>) {
+    let mut split_items = Vec::new();
+    let mut debtor_amounts = Vec::new();
+
+    for child in tagged_children {
+        let (creditor_amt, debtor_amt) = child.amount.random_rounded_even_split();
+
+        // Creditor half keeps original category
+        split_items.push(SplitUpdateItem {
+            amount: creditor_amt,
+            payee: Some(child.payee.clone()),
+            category_id: child.category_id,
+            notes: child.notes.clone(),
+            date: Some(child.date),
+        });
+
+        // Debtor half gets proxy category
+        split_items.push(SplitUpdateItem {
+            amount: debtor_amt,
+            payee: Some(child.payee.clone()),
+            category_id: Some(proxy_category_id),
+            notes: child.notes.clone(),
+            date: Some(child.date),
+        });
+
+        debtor_amounts.push(debtor_amt);
+    }
+
+    // Preserve siblings as-is
+    for sib in siblings {
+        split_items.push(SplitUpdateItem {
+            amount: sib.amount,
+            payee: Some(sib.payee.clone()),
+            category_id: sib.category_id,
+            notes: sib.notes.clone(),
+            date: Some(sib.date),
+        });
+    }
+
+    (split_items, debtor_amounts)
+}
+
 /// Remove the equailizer action tag and add the pending reconciliation tag.
 fn tag_names_replacing(tags: &Vec<Tag>, action_tag_to_remove: &String) -> Vec<String> {
     let mut names: Vec<String> = tags
@@ -232,6 +284,7 @@ mod tests {
                 split_tag: split_tag,
                 txns_to_add: vec![add_t1.clone(), add_t2.clone()],
                 txns_to_split: vec![split_t1.clone(), split_t2.clone()],
+                txns_to_resplit: vec![],
                 issues: vec![],
             },
             proxy_category_id,

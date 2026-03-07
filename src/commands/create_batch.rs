@@ -1,7 +1,7 @@
 mod create_updates;
 mod process_tags;
 
-use crate::commands::create_batch::create_updates::create_updates;
+use crate::commands::create_batch::create_updates::{create_resplit_items, create_updates};
 use crate::commands::create_batch::process_tags::process_tags;
 use crate::config;
 use crate::email::{EmailSender, Txn};
@@ -9,17 +9,17 @@ use crate::lunch_money::api::update_transaction::{
     TransactionAndSplitUpdate, TransactionUpdate,
 };
 use crate::lunch_money::api::LunchMoney;
-use crate::lunch_money::model::transaction::TransactionId;
+use crate::lunch_money::model::transaction::{Transaction, TransactionId};
 use crate::persist::{Batch, Persistence};
 use crate::usd::USD;
 use anyhow::Result;
 use chrono::NaiveDate;
+use std::collections::HashMap;
 use uuid::Uuid;
 
 #[derive(Debug, PartialEq)]
 pub enum Issue {
     AddTagHasChildren(TransactionId),
-    SplitTagHasParent(TransactionId),
     SplitTagHasChildren(TransactionId),
     TransactionUpdateError(TransactionId, String),
 }
@@ -47,6 +47,7 @@ pub async fn create_batch(
 
     // Get all transactions in provided date range.
     let txns = api.get_transactions(start_date, end_date).await?;
+    let all_txns = txns.clone(); // Keep for sibling lookup during resplits
 
     // Process tags on the retrieved transactions to see what should be
     // added to the batch.
@@ -58,9 +59,10 @@ pub async fn create_batch(
 
     let add_count = processed.txns_to_add.len();
     let split_count = processed.txns_to_split.len();
+    let resplit_count = processed.txns_to_resplit.len();
 
     // Check that we found at least 1 valid transaction.
-    if add_count + split_count == 0 {
+    if add_count + split_count + resplit_count == 0 {
         tracing::info!("No tagged transactions found — nothing to batch");
         return Ok(());
     }
@@ -68,6 +70,7 @@ pub async fn create_batch(
     tracing::info!(
         to_add = add_count,
         to_split = split_count,
+        to_resplit = resplit_count,
         "Tagged transactions found"
     );
 
@@ -76,6 +79,9 @@ pub async fn create_batch(
     for issue in &issues {
         tracing::warn!("{}", text_for_issue(issue));
     }
+
+    // Extract resplit transactions before create_updates consumes the rest.
+    let txns_to_resplit: Vec<Transaction> = std::mem::take(&mut processed.txns_to_resplit);
 
     // Create actionable updates for the processed results.
     let (add_updates, split_updates) = create_updates(processed, config.creditor.proxy_category_id);
@@ -95,6 +101,15 @@ pub async fn create_batch(
     {
         let (mut added_ids_and_email_txns, mut added_issues) =
             execute_splits(split_updates, api).await;
+        batched_txn_info.append(&mut added_ids_and_email_txns);
+        issues.append(&mut added_issues);
+    }
+
+    // Execute resplits: re-split parent transactions to split tagged children.
+    {
+        let (mut added_ids_and_email_txns, mut added_issues) =
+            execute_resplits(txns_to_resplit, &all_txns, config.creditor.proxy_category_id, api)
+                .await;
         batched_txn_info.append(&mut added_ids_and_email_txns);
         issues.append(&mut added_issues);
     }
@@ -223,14 +238,94 @@ async fn execute_splits(
     (batched_txn_info, issues)
 }
 
+/// Re-split parent transactions to split tagged child transactions.
+///
+/// For each tagged child, we replace it in its parent's split list with two new
+/// children (creditor half + debtor half), preserving all other siblings.
+async fn execute_resplits(
+    txns_to_resplit: Vec<Transaction>,
+    all_txns: &[Transaction],
+    proxy_category_id: u32,
+    api: &(impl LunchMoney + Sync),
+) -> (Vec<(TransactionId, Txn)>, Vec<Issue>) {
+    let mut batched_txn_info: Vec<(TransactionId, Txn)> = vec![];
+    let mut issues: Vec<Issue> = vec![];
+
+    // Group tagged children by parent_id.
+    let mut by_parent: HashMap<TransactionId, Vec<Transaction>> = HashMap::new();
+    for child in txns_to_resplit {
+        let parent_id = child.parent_id.expect("resplit txn must have parent_id");
+        by_parent.entry(parent_id).or_default().push(child);
+    }
+
+    for (parent_id, tagged_children) in by_parent {
+        let tagged_ids: Vec<TransactionId> =
+            tagged_children.iter().map(|t| t.id).collect();
+
+        // Find siblings (other children of the same parent) in the fetched transactions.
+        let siblings: Vec<Transaction> = all_txns
+            .iter()
+            .filter(|t| t.parent_id == Some(parent_id) && !tagged_ids.contains(&t.id))
+            .cloned()
+            .collect();
+
+        tracing::info!(
+            parent_id,
+            tagged_count = tagged_children.len(),
+            sibling_count = siblings.len(),
+            "Re-splitting parent transaction"
+        );
+
+        let (split_items, debtor_amounts) =
+            create_resplit_items(&tagged_children, &siblings, proxy_category_id);
+
+        let result = api.update_split((parent_id, split_items)).await;
+
+        match result {
+            Ok(split_response) => {
+                for (i, child) in tagged_children.iter().enumerate() {
+                    // Debtor halves are at odd indices: 1, 3, 5, ...
+                    let debtor_index = 2 * i + 1;
+                    match split_response.split_ids.get(debtor_index) {
+                        Some(&debtor_id) => {
+                            batched_txn_info.push((
+                                debtor_id,
+                                Txn {
+                                    payee: child.payee.clone(),
+                                    amount: debtor_amounts[i],
+                                    date: child.date,
+                                    notes: child.notes.clone(),
+                                },
+                            ));
+                        }
+                        None => {
+                            let msg = format!(
+                                "resplit response missing debtor ID at index {} for child {}",
+                                debtor_index, child.id
+                            );
+                            tracing::warn!(txn_id = child.id, msg, "Resplit response missing expected ID");
+                            issues.push(Issue::TransactionUpdateError(child.id, msg));
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                let msg = e.to_string();
+                tracing::warn!(parent_id, error = %msg, "Failed to resplit parent transaction");
+                for child in &tagged_children {
+                    issues.push(Issue::TransactionUpdateError(child.id, msg.clone()));
+                }
+            }
+        }
+    }
+
+    (batched_txn_info, issues)
+}
+
 fn text_for_issue(issue: &Issue) -> String {
     match issue {
         Issue::AddTagHasChildren(txn) => format!(
             "Transaction was tagged for batch, but it has children: {}",
-            txn
-        ),
-        Issue::SplitTagHasParent(txn) => format!(
-            "Transaction was tagged to split, but it has a parent: {}",
             txn
         ),
         Issue::SplitTagHasChildren(txn) => format!(

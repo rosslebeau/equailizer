@@ -270,3 +270,80 @@ async fn create_batch_mixed_add_and_split() {
     let calls = email.calls.lock().unwrap();
     assert_eq!(calls[0].txn_count, 2);
 }
+
+#[tokio::test]
+async fn create_batch_resplits_child_transaction() {
+    let config = test_config();
+
+    // Parent (id=100) was previously split into two children.
+    // Child 20 is tagged eq-to-split; child 21 is an untagged sibling.
+    let parent = test_transaction(100, 3000)
+        .with_children()
+        .with_date(2025, 10, 1)
+        .with_payee("Restaurant");
+    let tagged_child = test_transaction(20, 2000)
+        .with_parent(100)
+        .with_tags(vec![("eq-to-split", 11)])
+        .with_date(2025, 10, 1)
+        .with_payee("Restaurant")
+        .with_category(42, "Dining")
+        .with_notes("tagged child");
+    let sibling = test_transaction(21, 1000)
+        .with_parent(100)
+        .with_date(2025, 10, 1)
+        .with_payee("Restaurant")
+        .with_category(42, "Dining")
+        .with_notes("sibling");
+
+    // Mock returns [300, 301, 302] as the new child IDs after resplit:
+    // 300 = creditor half, 301 = debtor half, 302 = preserved sibling
+    let api = MockLunchMoney::new(vec![parent, tagged_child, sibling])
+        .with_split_ids(vec![vec![300, 301, 302]]);
+    let persistence = InMemoryPersistence::new();
+    let email = RecordingEmailSender::new();
+
+    let start = chrono::NaiveDate::from_ymd_opt(2025, 10, 1).unwrap();
+    let end = chrono::NaiveDate::from_ymd_opt(2025, 10, 31).unwrap();
+
+    create_batch(start, end, &config, &api, &persistence, &email)
+        .await
+        .expect("create_batch should succeed");
+
+    // Verify a batch was saved with the debtor half's ID (301)
+    let batches = persistence.saved_batches();
+    assert_eq!(batches.len(), 1);
+    let batch = &batches[0];
+    assert_eq!(batch.amount, USD::new_from_cents(1000)); // half of 2000
+    assert_eq!(batch.transaction_ids, vec![301]); // debtor half ID
+
+    // Verify update_split was called on the parent (not update_transaction_and_split)
+    let splits = api.splits_received.lock().unwrap();
+    assert_eq!(splits.len(), 1);
+    assert_eq!(splits[0].0, 100); // parent ID
+
+    // Split items should be: [creditor_half, debtor_half, sibling]
+    let split_items = &splits[0].1;
+    assert_eq!(split_items.len(), 3);
+
+    // Creditor half: half of $20, original category
+    assert_eq!(split_items[0].amount, USD::new_from_cents(1000));
+    assert_eq!(split_items[0].payee, Some("Restaurant".to_string()));
+    assert_eq!(split_items[0].category_id, Some(42)); // original category
+
+    // Debtor half: half of $20, proxy category
+    assert_eq!(split_items[1].amount, USD::new_from_cents(1000));
+    assert_eq!(split_items[1].payee, Some("Restaurant".to_string()));
+    assert_eq!(split_items[1].category_id, Some(99)); // proxy category
+
+    // Sibling: preserved as-is
+    assert_eq!(split_items[2].amount, USD::new_from_cents(1000));
+    assert_eq!(split_items[2].payee, Some("Restaurant".to_string()));
+    assert_eq!(split_items[2].category_id, Some(42));
+    assert_eq!(split_items[2].notes, Some("sibling".to_string()));
+
+    // Verify email was sent
+    assert_eq!(email.call_count(), 1);
+    let calls = email.calls.lock().unwrap();
+    assert_eq!(calls[0].txn_count, 1);
+    assert_eq!(calls[0].total, USD::new_from_cents(1000));
+}

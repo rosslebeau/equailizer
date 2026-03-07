@@ -9,6 +9,7 @@ pub struct ProcessTagsOutput {
     pub split_tag: String,
     pub txns_to_add: Vec<Transaction>,
     pub txns_to_split: Vec<Transaction>,
+    pub txns_to_resplit: Vec<Transaction>,
     pub issues: Vec<Issue>,
 }
 
@@ -58,14 +59,23 @@ pub fn process_tags(
     let (txns_to_add, mut new_issues) = filter_invalid_txns_to_add(txns_to_add);
     issues.append(&mut new_issues);
 
-    let (txns_to_split, mut new_issues) = filter_invalid_txns_to_split(txns_to_split);
+    let (txns_to_split, txns_to_resplit, mut new_issues) =
+        filter_invalid_txns_to_split(txns_to_split);
     issues.append(&mut new_issues);
+
+    if !txns_to_resplit.is_empty() {
+        tracing::info!(
+            count = txns_to_resplit.len(),
+            "Found child transactions to resplit"
+        );
+    }
 
     return ProcessTagsOutput {
         add_tag: add_tag.clone(),
         split_tag: split_tag.clone(),
         txns_to_add: txns_to_add,
         txns_to_split: txns_to_split,
+        txns_to_resplit: txns_to_resplit,
         issues: issues,
     };
 }
@@ -92,33 +102,30 @@ fn filter_invalid_txns_to_add(txns: Vec<Transaction>) -> (Vec<Transaction>, Vec<
     )
 }
 
-fn filter_invalid_txns_to_split(txns: Vec<Transaction>) -> (Vec<Transaction>, Vec<Issue>) {
+fn filter_invalid_txns_to_split(
+    txns: Vec<Transaction>,
+) -> (Vec<Transaction>, Vec<Transaction>, Vec<Issue>) {
     txns.into_iter().fold(
-        (Vec::<Transaction>::new(), Vec::<Issue>::new()),
-        |(mut valid, mut issues), txn| {
+        (vec![], vec![], vec![]),
+        |(mut valid, mut resplit, mut issues), txn| {
             if txn.has_children {
-                // This is a parent txn that is already split. These are
-                // not shown in Lunch Money and it is user error to tag them
-                // for equailizer processing.
                 tracing::debug!(
                     txn_id = txn.id,
                     "Found 'split' tag, but transaction has children"
                 );
                 issues.push(Issue::SplitTagHasChildren(txn.id));
             } else if txn.parent_id.is_some() {
-                // This is a parent txn that is already split. These are
-                // not shown in Lunch Money and it is user error to tag them
-                // for equailizer processing.
                 tracing::debug!(
                     txn_id = txn.id,
-                    "Found 'split' tag, but transaction already has a parent"
+                    parent_id = txn.parent_id.unwrap(),
+                    "Found 'split' tag on child transaction — will resplit parent"
                 );
-                issues.push(Issue::SplitTagHasParent(txn.id));
+                resplit.push(txn);
             } else {
                 valid.push(txn);
             }
 
-            return (valid, issues);
+            return (valid, resplit, issues);
         },
     )
 }
@@ -239,7 +246,7 @@ mod tests {
                 add_t.clone(),
                 add_has_children_t,
                 split_t.clone(),
-                split_has_parent_t,
+                split_has_parent_t.clone(),
                 split_has_children_t,
             ],
             &add_tag,
@@ -247,7 +254,6 @@ mod tests {
         );
 
         let add_has_children_issue: Issue = Issue::AddTagHasChildren(1025);
-        let split_has_parent_issue: Issue = Issue::SplitTagHasParent(1027);
         let split_has_children_issue: Issue = Issue::SplitTagHasChildren(1028);
 
         let assert_output: ProcessTagsOutput = ProcessTagsOutput {
@@ -255,9 +261,9 @@ mod tests {
             split_tag,
             txns_to_add: vec![add_t],
             txns_to_split: vec![split_t],
+            txns_to_resplit: vec![split_has_parent_t],
             issues: vec![
                 add_has_children_issue,
-                split_has_parent_issue,
                 split_has_children_issue,
             ],
         };
