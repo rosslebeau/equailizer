@@ -13,6 +13,21 @@ pub struct Config {
     pub creditor: Creditor,
     pub debtor: Debtor,
     pub jmap: JMAP,
+    #[serde(default)]
+    pub plugins: Vec<PluginEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PluginEntry {
+    pub path: String,
+    #[serde(rename = "type")]
+    pub plugin_type: PluginType,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PluginType {
+    Notifications,
 }
 
 #[derive(Debug, Deserialize)]

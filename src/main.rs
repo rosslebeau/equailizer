@@ -3,6 +3,8 @@ mod log;
 
 use equailizer::lunch_money::api::LunchMoneyClient;
 use equailizer::lunch_money::model::transaction::TransactionId;
+use equailizer::plugin::protocol::PluginMessage;
+use equailizer::plugin::PluginManager;
 use equailizer::usd::USD;
 use chrono::NaiveDate;
 use clap::Parser;
@@ -30,10 +32,27 @@ async fn main() {
                 dry_run,
                 "Starting command"
             );
-            match handle_create_batch(start, end_date, profile, dry_run).await {
-                Ok(_) => tracing::info!("Finished create-batch command successfully"),
+            let config = equailizer::config::read_config(&profile);
+            let mut plugins = match &config {
+                Ok(c) => PluginManager::start(&c.plugins, &profile, dry_run).await,
+                Err(_) => PluginManager::empty(),
+            };
+            match config {
+                Ok(config) => {
+                    match handle_create_batch(start, end_date, &config, &profile, dry_run, &mut plugins).await {
+                        Ok(_) => tracing::info!("Finished create-batch command successfully"),
+                        Err(e) => {
+                            plugins.dispatch(&PluginMessage::CommandError {
+                                command: "create-batch".to_string(),
+                                error: format!("{e:#}"),
+                            }).await;
+                            tracing::error!("{e:#}", e = e);
+                        }
+                    }
+                }
                 Err(e) => tracing::error!("{e:#}", e = e),
             }
+            plugins.shutdown().await;
         }
         cli::Commands::Reconcile {
             batch_name,
@@ -47,10 +66,27 @@ async fn main() {
                 dry_run,
                 "Starting command"
             );
-            match handle_reconcile(batch_name, profile, dry_run).await {
-                Ok(_) => tracing::info!("Finished reconcile command successfully"),
+            let config = equailizer::config::read_config(&profile);
+            let mut plugins = match &config {
+                Ok(c) => PluginManager::start(&c.plugins, &profile, dry_run).await,
+                Err(_) => PluginManager::empty(),
+            };
+            match config {
+                Ok(config) => {
+                    match handle_reconcile(batch_name, &config, &profile, dry_run, &mut plugins).await {
+                        Ok(_) => tracing::info!("Finished reconcile command successfully"),
+                        Err(e) => {
+                            plugins.dispatch(&PluginMessage::CommandError {
+                                command: "reconcile".to_string(),
+                                error: format!("{e:#}"),
+                            }).await;
+                            tracing::error!("{e:#}", e = e);
+                        }
+                    }
+                }
                 Err(e) => tracing::error!("{e:#}", e = e),
             }
+            plugins.shutdown().await;
         }
         cli::Commands::ReconcileAll { profile, dry_run } => {
             tracing::info!(
@@ -59,15 +95,36 @@ async fn main() {
                 dry_run,
                 "Starting command"
             );
-            match handle_reconcile_all(profile, dry_run).await {
-                Ok(errors) => {
-                    for error in &errors {
-                        tracing::warn!("{}", error);
+            let config = equailizer::config::read_config(&profile);
+            let mut plugins = match &config {
+                Ok(c) => PluginManager::start(&c.plugins, &profile, dry_run).await,
+                Err(_) => PluginManager::empty(),
+            };
+            match config {
+                Ok(config) => {
+                    match handle_reconcile_all(&config, &profile, dry_run, &mut plugins).await {
+                        Ok(result) => {
+                            for error in &result.errors {
+                                tracing::warn!("{}", error);
+                            }
+                            plugins.dispatch(&PluginMessage::reconcile_all_complete(
+                                result.reconciled,
+                                &result.errors,
+                            )).await;
+                            tracing::info!("Finished reconcile-all command successfully");
+                        }
+                        Err(e) => {
+                            plugins.dispatch(&PluginMessage::CommandError {
+                                command: "reconcile-all".to_string(),
+                                error: format!("{e:#}"),
+                            }).await;
+                            tracing::error!("{e:#}", e = e);
+                        }
                     }
-                    tracing::info!("Finished reconcile-all command successfully");
                 }
                 Err(e) => tracing::error!("{e:#}", e = e),
             }
+            plugins.shutdown().await;
         }
         #[cfg(debug_assertions)]
         cli::Commands::Dev(subcommand) => match subcommand {
@@ -92,10 +149,11 @@ async fn main() {
 async fn handle_create_batch(
     start: StartArgs,
     end_date: Option<NaiveDate>,
-    profile: String,
+    config: &equailizer::config::Config,
+    profile: &str,
     dry_run: bool,
+    plugins: &mut PluginManager,
 ) -> equailizer::error::Result<()> {
-    let config = equailizer::config::read_config(&profile)?;
     let start_date = cli::start_date_from_args(start);
     let end_date = end_date.or_naive_date_now();
 
@@ -103,7 +161,7 @@ async fn handle_create_batch(
         auth_token: config.creditor.api_key.clone(),
         dry_run,
     };
-    let persistence = equailizer::persist::FilePersistence::new(&profile, dry_run)?;
+    let persistence = equailizer::persist::FilePersistence::new(profile, dry_run)?;
     let notifier = equailizer::email::JmapBatchNotifier {
         api_session_endpoint: config.jmap.api_session_endpoint.clone(),
         api_key: config.jmap.api_key.clone(),
@@ -118,20 +176,22 @@ async fn handle_create_batch(
     equailizer::commands::create_batch::create_batch(
         start_date,
         end_date,
-        &config,
+        config,
         &api,
         &persistence,
         &notifier,
+        plugins,
     )
     .await
 }
 
 async fn handle_reconcile(
     batch_name: String,
-    profile: String,
+    config: &equailizer::config::Config,
+    profile: &str,
     dry_run: bool,
+    plugins: &mut PluginManager,
 ) -> equailizer::error::Result<()> {
-    let config = equailizer::config::read_config(&profile)?;
     let creditor_api = LunchMoneyClient {
         auth_token: config.creditor.api_key.clone(),
         dry_run,
@@ -140,20 +200,25 @@ async fn handle_reconcile(
         auth_token: config.debtor.api_key.clone(),
         dry_run,
     };
-    let persistence = equailizer::persist::FilePersistence::new(&profile, dry_run)?;
+    let persistence = equailizer::persist::FilePersistence::new(profile, dry_run)?;
 
     equailizer::commands::reconcile::reconcile_batch_name(
         &batch_name,
-        &config,
+        config,
         &creditor_api,
         &debtor_api,
         &persistence,
+        plugins,
     )
     .await
 }
 
-async fn handle_reconcile_all(profile: String, dry_run: bool) -> equailizer::error::Result<Vec<equailizer::error::Error>> {
-    let config = equailizer::config::read_config(&profile)?;
+async fn handle_reconcile_all(
+    config: &equailizer::config::Config,
+    profile: &str,
+    dry_run: bool,
+    plugins: &mut PluginManager,
+) -> equailizer::error::Result<equailizer::commands::reconcile::ReconcileAllResult> {
     let creditor_api = LunchMoneyClient {
         auth_token: config.creditor.api_key.clone(),
         dry_run,
@@ -162,13 +227,14 @@ async fn handle_reconcile_all(profile: String, dry_run: bool) -> equailizer::err
         auth_token: config.debtor.api_key.clone(),
         dry_run,
     };
-    let persistence = equailizer::persist::FilePersistence::new(&profile, dry_run)?;
+    let persistence = equailizer::persist::FilePersistence::new(profile, dry_run)?;
 
     equailizer::commands::reconcile::reconcile_all(
-        &config,
+        config,
         &creditor_api,
         &debtor_api,
         &persistence,
+        plugins,
     )
     .await
 }

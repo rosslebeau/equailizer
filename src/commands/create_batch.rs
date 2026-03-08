@@ -13,6 +13,8 @@ use crate::lunch_money::api::update_transaction::{
 use crate::lunch_money::api::LunchMoney;
 use crate::lunch_money::model::transaction::{Transaction, TransactionId};
 use crate::persist::{Batch, Persistence};
+use crate::plugin::protocol::PluginMessage;
+use crate::plugin::PluginManager;
 use crate::usd::USD;
 use chrono::NaiveDate;
 use std::collections::HashMap;
@@ -25,6 +27,7 @@ pub async fn create_batch(
     api: &(impl LunchMoney + Sync),
     persistence: &(impl Persistence + Sync),
     notifier: &(impl BatchNotifier + Sync),
+    plugins: &mut PluginManager,
 ) -> Result<()> {
     let span = tracing::info_span!("Create Batch");
     let _enter = span.enter();
@@ -133,8 +136,18 @@ pub async fn create_batch(
     // Send the batch notification.
     let email_warnings: Vec<String> = issues.iter().map(|i| i.to_string()).collect();
     notifier
-        .send_batch_notification(&batch_id, &total_amount, &email_txns, email_warnings)
+        .send_batch_notification(&batch_id, &total_amount, &email_txns, email_warnings.clone())
         .await?;
+
+    // Dispatch to plugins.
+    plugins
+        .dispatch(&PluginMessage::batch_created(
+            &batch_id,
+            &total_amount,
+            &email_txns,
+            &email_warnings,
+        ))
+        .await;
 
     tracing::info!(
         batch_id,

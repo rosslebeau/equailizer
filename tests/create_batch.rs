@@ -4,6 +4,7 @@ use equailizer::commands::create_batch::create_batch;
 use equailizer::config::{self, Config, Creditor, Debtor, JMAP};
 use equailizer::usd::USD;
 use support::builders::{test_transaction, TransactionBuilder};
+use equailizer::plugin::PluginManager;
 use support::mocks::{InMemoryPersistence, MockLunchMoney, RecordingBatchNotifier};
 
 fn test_config() -> Config {
@@ -27,6 +28,7 @@ fn test_config() -> Config {
             sent_mailbox: "sent".to_string(),
             sending_address: "sender@test.com".to_string(),
         },
+        plugins: vec![],
     }
 }
 
@@ -53,7 +55,7 @@ async fn create_batch_with_add_tagged_transactions() {
     let start = chrono::NaiveDate::from_ymd_opt(2025, 3, 1).unwrap();
     let end = chrono::NaiveDate::from_ymd_opt(2025, 3, 31).unwrap();
 
-    create_batch(start, end, &config, &api, &persistence, &notifier)
+    create_batch(start, end, &config, &api, &persistence, &notifier, &mut PluginManager::empty())
         .await
         .expect("create_batch should succeed");
 
@@ -102,7 +104,7 @@ async fn create_batch_with_split_tagged_transactions() {
     let start = chrono::NaiveDate::from_ymd_opt(2025, 4, 1).unwrap();
     let end = chrono::NaiveDate::from_ymd_opt(2025, 4, 30).unwrap();
 
-    create_batch(start, end, &config, &api, &persistence, &notifier)
+    create_batch(start, end, &config, &api, &persistence, &notifier, &mut PluginManager::empty())
         .await
         .expect("create_batch should succeed");
 
@@ -139,7 +141,7 @@ async fn create_batch_with_no_tagged_transactions() {
     let start = chrono::NaiveDate::from_ymd_opt(2025, 5, 1).unwrap();
     let end = chrono::NaiveDate::from_ymd_opt(2025, 5, 31).unwrap();
 
-    create_batch(start, end, &config, &api, &persistence, &notifier)
+    create_batch(start, end, &config, &api, &persistence, &notifier, &mut PluginManager::empty())
         .await
         .expect("create_batch should succeed");
 
@@ -159,7 +161,7 @@ async fn create_batch_rejects_start_after_end() {
     let start = chrono::NaiveDate::from_ymd_opt(2025, 6, 30).unwrap();
     let end = chrono::NaiveDate::from_ymd_opt(2025, 6, 1).unwrap();
 
-    let result = create_batch(start, end, &config, &api, &persistence, &notifier).await;
+    let result = create_batch(start, end, &config, &api, &persistence, &notifier, &mut PluginManager::empty()).await;
 
     assert!(result.is_err());
     assert!(
@@ -186,7 +188,7 @@ async fn create_batch_skips_pending_transactions() {
     let start = chrono::NaiveDate::from_ymd_opt(2025, 7, 1).unwrap();
     let end = chrono::NaiveDate::from_ymd_opt(2025, 7, 31).unwrap();
 
-    create_batch(start, end, &config, &api, &persistence, &notifier)
+    create_batch(start, end, &config, &api, &persistence, &notifier, &mut PluginManager::empty())
         .await
         .expect("create_batch should succeed");
 
@@ -215,7 +217,7 @@ async fn create_batch_issues_warning_for_add_with_children() {
     let start = chrono::NaiveDate::from_ymd_opt(2025, 8, 1).unwrap();
     let end = chrono::NaiveDate::from_ymd_opt(2025, 8, 31).unwrap();
 
-    create_batch(start, end, &config, &api, &persistence, &notifier)
+    create_batch(start, end, &config, &api, &persistence, &notifier, &mut PluginManager::empty())
         .await
         .expect("create_batch should succeed");
 
@@ -250,7 +252,7 @@ async fn create_batch_issues_warning_for_split_with_children() {
     let start = chrono::NaiveDate::from_ymd_opt(2025, 8, 1).unwrap();
     let end = chrono::NaiveDate::from_ymd_opt(2025, 8, 31).unwrap();
 
-    create_batch(start, end, &config, &api, &persistence, &notifier)
+    create_batch(start, end, &config, &api, &persistence, &notifier, &mut PluginManager::empty())
         .await
         .expect("create_batch should succeed");
 
@@ -286,7 +288,7 @@ async fn create_batch_issues_warning_for_update_error() {
     let start = chrono::NaiveDate::from_ymd_opt(2025, 8, 1).unwrap();
     let end = chrono::NaiveDate::from_ymd_opt(2025, 8, 31).unwrap();
 
-    create_batch(start, end, &config, &api, &persistence, &notifier)
+    create_batch(start, end, &config, &api, &persistence, &notifier, &mut PluginManager::empty())
         .await
         .expect("create_batch should succeed");
 
@@ -324,7 +326,7 @@ async fn create_batch_mixed_add_and_split() {
     let start = chrono::NaiveDate::from_ymd_opt(2025, 9, 1).unwrap();
     let end = chrono::NaiveDate::from_ymd_opt(2025, 9, 30).unwrap();
 
-    create_batch(start, end, &config, &api, &persistence, &notifier)
+    create_batch(start, end, &config, &api, &persistence, &notifier, &mut PluginManager::empty())
         .await
         .expect("create_batch should succeed");
 
@@ -376,7 +378,7 @@ async fn create_batch_resplits_child_transaction() {
     let start = chrono::NaiveDate::from_ymd_opt(2025, 10, 1).unwrap();
     let end = chrono::NaiveDate::from_ymd_opt(2025, 10, 31).unwrap();
 
-    create_batch(start, end, &config, &api, &persistence, &notifier)
+    create_batch(start, end, &config, &api, &persistence, &notifier, &mut PluginManager::empty())
         .await
         .expect("create_batch should succeed");
 

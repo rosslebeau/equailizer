@@ -8,4 +8,5 @@ pub mod error;
 pub mod issue;
 pub mod lunch_money;
 pub mod persist;
+pub mod plugin;
 pub mod usd;

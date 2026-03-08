@@ -10,29 +10,40 @@ use crate::{
         model::transaction::{Transaction, TransactionId, TransactionStatus},
     },
     persist::{Batch, Persistence, Settlement},
+    plugin::protocol::PluginMessage,
+    plugin::PluginManager,
     usd::USD,
 };
+
+pub struct ReconcileAllResult {
+    pub reconciled: u32,
+    pub errors: Vec<Error>,
+}
 
 pub async fn reconcile_all(
     config: &Config,
     creditor_api: &(impl LunchMoney + Sync),
     debtor_api: &(impl LunchMoney + Sync),
     persistence: &(impl Persistence + Sync),
-) -> Result<Vec<Error>> {
+    plugins: &mut PluginManager,
+) -> Result<ReconcileAllResult> {
     let unreconciled = persistence.unreconciled_batches()?;
     let total = unreconciled.len();
     tracing::info!(unreconciled_batches = total, "Starting reconcile-all");
 
     if total == 0 {
         tracing::info!("No unreconciled batches found");
-        return Ok(vec![]);
+        return Ok(ReconcileAllResult {
+            reconciled: 0,
+            errors: vec![],
+        });
     }
 
     let mut reconciled = 0u32;
     let mut errors: Vec<Error> = vec![];
     for batch in unreconciled {
         let batch_id = batch.id.clone();
-        match reconcile_batch(batch, config, creditor_api, debtor_api, persistence).await {
+        match reconcile_batch(batch, config, creditor_api, debtor_api, persistence, plugins).await {
             Ok(()) => reconciled += 1,
             Err(e) => {
                 tracing::warn!(batch_id, error = %e, "Failed to reconcile batch");
@@ -45,7 +56,7 @@ pub async fn reconcile_all(
     }
 
     tracing::info!(reconciled, failed = errors.len(), total, "Reconcile-all complete");
-    Ok(errors)
+    Ok(ReconcileAllResult { reconciled, errors })
 }
 
 pub async fn reconcile_batch_name(
@@ -54,6 +65,7 @@ pub async fn reconcile_batch_name(
     creditor_api: &(impl LunchMoney + Sync),
     debtor_api: &(impl LunchMoney + Sync),
     persistence: &(impl Persistence + Sync),
+    plugins: &mut PluginManager,
 ) -> Result<()> {
     reconcile_batch(
         persistence.get_batch(batch_name)?,
@@ -61,6 +73,7 @@ pub async fn reconcile_batch_name(
         creditor_api,
         debtor_api,
         persistence,
+        plugins,
     )
     .await
 }
@@ -71,6 +84,7 @@ async fn reconcile_batch(
     creditor_api: &(impl LunchMoney + Sync),
     debtor_api: &(impl LunchMoney + Sync),
     persistence: &(impl Persistence + Sync),
+    plugins: &mut PluginManager,
 ) -> Result<()> {
     if batch.reconciliation.is_some() {
         return Err(Error::BatchAlreadyReconciled(batch.id));
@@ -170,9 +184,20 @@ async fn reconcile_batch(
     // Remove the pending reconciliation tag from batch transactions.
     remove_pending_tags(&batch_txns, creditor_api).await?;
 
+    // Dispatch to plugins before saving (which moves batch fields).
+    plugins
+        .dispatch(&PluginMessage::batch_reconciled(
+            &batch,
+            settlement_credit.id,
+            settlement_debit.id,
+        ))
+        .await;
+
+    let batch_id = batch.id.clone();
+
     // Save batch so we know it's reconciled.
     persistence.save_batch(&Batch {
-        id: batch.id.clone(),
+        id: batch.id,
         amount: batch.amount,
         transaction_ids: batch.transaction_ids,
         reconciliation: Some(Settlement {
@@ -182,7 +207,7 @@ async fn reconcile_batch(
     })?;
 
     tracing::info!(
-        batch_id = %batch.id,
+        batch_id,
         settlement_credit_id = settlement_credit.id,
         settlement_debit_id = settlement_debit.id,
         "Batch reconciled"

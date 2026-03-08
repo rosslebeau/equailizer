@@ -9,6 +9,7 @@ use equailizer::lunch_money::model::transaction::TransactionStatus;
 use equailizer::persist::{Batch, Settlement};
 use equailizer::usd::USD;
 use support::builders::{test_transaction, TransactionBuilder};
+use equailizer::plugin::PluginManager;
 use support::mocks::{InMemoryPersistence, MockLunchMoney};
 
 fn test_config() -> Config {
@@ -32,6 +33,7 @@ fn test_config() -> Config {
             sent_mailbox: "sent".to_string(),
             sending_address: "sender@test.com".to_string(),
         },
+        plugins: vec![],
     }
 }
 
@@ -203,6 +205,7 @@ async fn reconcile_batch_end_to_end() {
         &creditor_api,
         &debtor_api,
         &persistence,
+        &mut PluginManager::empty(),
     )
     .await
     .expect("reconcile should succeed");
@@ -278,6 +281,7 @@ async fn reconcile_fails_when_already_reconciled() {
         &creditor_api,
         &debtor_api,
         &persistence,
+        &mut PluginManager::empty(),
     )
     .await;
 
@@ -315,6 +319,7 @@ async fn reconcile_fails_when_no_settlement_credit() {
         &creditor_api,
         &debtor_api,
         &persistence,
+        &mut PluginManager::empty(),
     )
     .await;
 
@@ -358,16 +363,17 @@ async fn reconcile_all_processes_unreconciled_batches() {
     let persistence =
         InMemoryPersistence::with_batches(vec![unreconciled_batch, already_reconciled]);
 
-    let errors = equailizer::commands::reconcile::reconcile_all(
+    let result = equailizer::commands::reconcile::reconcile_all(
         &config,
         &creditor_api,
         &debtor_api,
         &persistence,
+        &mut PluginManager::empty(),
     )
     .await
     .expect("reconcile_all should succeed");
 
-    assert!(errors.is_empty());
+    assert!(result.errors.is_empty());
 
     // Only the unreconciled batch should have been processed
     let splits = creditor_api.splits_received.lock().unwrap();
@@ -418,18 +424,19 @@ async fn reconcile_all_continues_after_batch_failure() {
     let persistence =
         InMemoryPersistence::with_batches(vec![failing_batch, succeeding_batch]);
 
-    let errors = equailizer::commands::reconcile::reconcile_all(
+    let result = equailizer::commands::reconcile::reconcile_all(
         &config,
         &creditor_api,
         &debtor_api,
         &persistence,
+        &mut PluginManager::empty(),
     )
     .await
     .expect("reconcile_all should succeed even with batch failures");
 
     // One batch failed, so we should have one error
-    assert_eq!(errors.len(), 1);
-    assert!(errors[0].to_string().contains("will-fail"));
+    assert_eq!(result.errors.len(), 1);
+    assert!(result.errors[0].to_string().contains("will-fail"));
 
     // The succeeding batch should still be reconciled
     let saved = persistence.saved_batches();
@@ -481,6 +488,7 @@ async fn reconcile_removes_pending_tag_from_batch_transactions() {
         &creditor_api,
         &debtor_api,
         &persistence,
+        &mut PluginManager::empty(),
     )
     .await
     .expect("reconcile should succeed");
