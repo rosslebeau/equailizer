@@ -4,7 +4,7 @@ use equailizer::commands::create_batch::create_batch;
 use equailizer::config::{self, Config, Creditor, Debtor, JMAP};
 use equailizer::usd::USD;
 use support::builders::{test_transaction, TransactionBuilder};
-use support::mocks::{InMemoryPersistence, MockLunchMoney, RecordingEmailSender};
+use support::mocks::{InMemoryPersistence, MockLunchMoney, RecordingBatchNotifier};
 
 fn test_config() -> Config {
     Config {
@@ -48,12 +48,12 @@ async fn create_batch_with_add_tagged_transactions() {
 
     let api = MockLunchMoney::new(txns);
     let persistence = InMemoryPersistence::new();
-    let email = RecordingEmailSender::new();
+    let notifier = RecordingBatchNotifier::new();
 
     let start = chrono::NaiveDate::from_ymd_opt(2025, 3, 1).unwrap();
     let end = chrono::NaiveDate::from_ymd_opt(2025, 3, 31).unwrap();
 
-    create_batch(start, end, &config, &api, &persistence, &email)
+    create_batch(start, end, &config, &api, &persistence, &notifier)
         .await
         .expect("create_batch should succeed");
 
@@ -77,9 +77,9 @@ async fn create_batch_with_add_tagged_transactions() {
     assert_eq!(updates[1].0, 2);
     assert!(updates[1].1.tags.as_ref().unwrap().contains(&config::TAG_PENDING_RECONCILIATION.to_string()));
 
-    // Verify email was sent
-    assert_eq!(email.call_count(), 1);
-    let calls = email.calls.lock().unwrap();
+    // Verify notification was sent
+    assert_eq!(notifier.call_count(), 1);
+    let calls = notifier.calls.lock().unwrap();
     assert_eq!(calls[0].total, USD::new_from_cents(4000));
     assert_eq!(calls[0].txn_count, 2);
 }
@@ -97,12 +97,12 @@ async fn create_batch_with_split_tagged_transactions() {
         .with_split_ids(vec![vec![200, 201]]); // creditor split id, debtor split id
 
     let persistence = InMemoryPersistence::new();
-    let email = RecordingEmailSender::new();
+    let notifier = RecordingBatchNotifier::new();
 
     let start = chrono::NaiveDate::from_ymd_opt(2025, 4, 1).unwrap();
     let end = chrono::NaiveDate::from_ymd_opt(2025, 4, 30).unwrap();
 
-    create_batch(start, end, &config, &api, &persistence, &email)
+    create_batch(start, end, &config, &api, &persistence, &notifier)
         .await
         .expect("create_batch should succeed");
 
@@ -121,8 +121,8 @@ async fn create_batch_with_split_tagged_transactions() {
     // Pending reconciliation tag should be set on the parent update
     assert!(splits[0].1.tags.as_ref().unwrap().contains(&config::TAG_PENDING_RECONCILIATION.to_string()));
 
-    // Verify email was sent
-    assert_eq!(email.call_count(), 1);
+    // Verify notification was sent
+    assert_eq!(notifier.call_count(), 1);
 }
 
 #[tokio::test]
@@ -134,19 +134,19 @@ async fn create_batch_with_no_tagged_transactions() {
 
     let api = MockLunchMoney::new(txns);
     let persistence = InMemoryPersistence::new();
-    let email = RecordingEmailSender::new();
+    let notifier = RecordingBatchNotifier::new();
 
     let start = chrono::NaiveDate::from_ymd_opt(2025, 5, 1).unwrap();
     let end = chrono::NaiveDate::from_ymd_opt(2025, 5, 31).unwrap();
 
-    create_batch(start, end, &config, &api, &persistence, &email)
+    create_batch(start, end, &config, &api, &persistence, &notifier)
         .await
         .expect("create_batch should succeed");
 
     // No batch should be created
     assert_eq!(persistence.saved_batches().len(), 0);
-    // No email should be sent
-    assert_eq!(email.call_count(), 0);
+    // No notification should be sent
+    assert_eq!(notifier.call_count(), 0);
 }
 
 #[tokio::test]
@@ -154,12 +154,12 @@ async fn create_batch_rejects_start_after_end() {
     let config = test_config();
     let api = MockLunchMoney::new(vec![]);
     let persistence = InMemoryPersistence::new();
-    let email = RecordingEmailSender::new();
+    let notifier = RecordingBatchNotifier::new();
 
     let start = chrono::NaiveDate::from_ymd_opt(2025, 6, 30).unwrap();
     let end = chrono::NaiveDate::from_ymd_opt(2025, 6, 1).unwrap();
 
-    let result = create_batch(start, end, &config, &api, &persistence, &email).await;
+    let result = create_batch(start, end, &config, &api, &persistence, &notifier).await;
 
     assert!(result.is_err());
     assert!(
@@ -181,18 +181,18 @@ async fn create_batch_skips_pending_transactions() {
 
     let api = MockLunchMoney::new(txns);
     let persistence = InMemoryPersistence::new();
-    let email = RecordingEmailSender::new();
+    let notifier = RecordingBatchNotifier::new();
 
     let start = chrono::NaiveDate::from_ymd_opt(2025, 7, 1).unwrap();
     let end = chrono::NaiveDate::from_ymd_opt(2025, 7, 31).unwrap();
 
-    create_batch(start, end, &config, &api, &persistence, &email)
+    create_batch(start, end, &config, &api, &persistence, &notifier)
         .await
         .expect("create_batch should succeed");
 
     // Pending txns should be filtered out, resulting in no batch
     assert_eq!(persistence.saved_batches().len(), 0);
-    assert_eq!(email.call_count(), 0);
+    assert_eq!(notifier.call_count(), 0);
 }
 
 #[tokio::test]
@@ -210,12 +210,12 @@ async fn create_batch_issues_warning_for_add_with_children() {
 
     let api = MockLunchMoney::new(txns);
     let persistence = InMemoryPersistence::new();
-    let email = RecordingEmailSender::new();
+    let notifier = RecordingBatchNotifier::new();
 
     let start = chrono::NaiveDate::from_ymd_opt(2025, 8, 1).unwrap();
     let end = chrono::NaiveDate::from_ymd_opt(2025, 8, 31).unwrap();
 
-    create_batch(start, end, &config, &api, &persistence, &email)
+    create_batch(start, end, &config, &api, &persistence, &notifier)
         .await
         .expect("create_batch should succeed");
 
@@ -224,8 +224,8 @@ async fn create_batch_issues_warning_for_add_with_children() {
     assert_eq!(batches.len(), 1);
     assert_eq!(batches[0].amount, USD::new_from_cents(1500));
 
-    // Warning should be included in email
-    let calls = email.calls.lock().unwrap();
+    // Warning should be included in notification
+    let calls = notifier.calls.lock().unwrap();
     assert_eq!(calls[0].warnings.len(), 1);
     assert!(calls[0].warnings[0].contains("has children"));
 }
@@ -245,12 +245,12 @@ async fn create_batch_issues_warning_for_split_with_children() {
 
     let api = MockLunchMoney::new(txns);
     let persistence = InMemoryPersistence::new();
-    let email = RecordingEmailSender::new();
+    let notifier = RecordingBatchNotifier::new();
 
     let start = chrono::NaiveDate::from_ymd_opt(2025, 8, 1).unwrap();
     let end = chrono::NaiveDate::from_ymd_opt(2025, 8, 31).unwrap();
 
-    create_batch(start, end, &config, &api, &persistence, &email)
+    create_batch(start, end, &config, &api, &persistence, &notifier)
         .await
         .expect("create_batch should succeed");
 
@@ -259,8 +259,8 @@ async fn create_batch_issues_warning_for_split_with_children() {
     assert_eq!(batches.len(), 1);
     assert_eq!(batches[0].amount, USD::new_from_cents(1500));
 
-    // Warning should be included in email
-    let calls = email.calls.lock().unwrap();
+    // Warning should be included in notification
+    let calls = notifier.calls.lock().unwrap();
     assert_eq!(calls[0].warnings.len(), 1);
     assert!(calls[0].warnings[0].contains("already has children"));
 }
@@ -281,12 +281,12 @@ async fn create_batch_issues_warning_for_update_error() {
 
     let api = MockLunchMoney::new(txns).with_failing_updates(vec![2]);
     let persistence = InMemoryPersistence::new();
-    let email = RecordingEmailSender::new();
+    let notifier = RecordingBatchNotifier::new();
 
     let start = chrono::NaiveDate::from_ymd_opt(2025, 8, 1).unwrap();
     let end = chrono::NaiveDate::from_ymd_opt(2025, 8, 31).unwrap();
 
-    create_batch(start, end, &config, &api, &persistence, &email)
+    create_batch(start, end, &config, &api, &persistence, &notifier)
         .await
         .expect("create_batch should succeed");
 
@@ -295,8 +295,8 @@ async fn create_batch_issues_warning_for_update_error() {
     assert_eq!(batches.len(), 1);
     assert_eq!(batches[0].amount, USD::new_from_cents(1500));
 
-    // Warning about the update error should be included in email
-    let calls = email.calls.lock().unwrap();
+    // Warning about the update error should be included in notification
+    let calls = notifier.calls.lock().unwrap();
     assert_eq!(calls[0].warnings.len(), 1);
     assert!(calls[0].warnings[0].contains("Error when updating transaction 2"));
 }
@@ -319,12 +319,12 @@ async fn create_batch_mixed_add_and_split() {
     let api = MockLunchMoney::new(txns)
         .with_split_ids(vec![vec![300, 301]]);
     let persistence = InMemoryPersistence::new();
-    let email = RecordingEmailSender::new();
+    let notifier = RecordingBatchNotifier::new();
 
     let start = chrono::NaiveDate::from_ymd_opt(2025, 9, 1).unwrap();
     let end = chrono::NaiveDate::from_ymd_opt(2025, 9, 30).unwrap();
 
-    create_batch(start, end, &config, &api, &persistence, &email)
+    create_batch(start, end, &config, &api, &persistence, &notifier)
         .await
         .expect("create_batch should succeed");
 
@@ -337,8 +337,8 @@ async fn create_batch_mixed_add_and_split() {
     assert_eq!(api.updates_received.lock().unwrap().len(), 1);
     assert_eq!(api.update_and_splits_received.lock().unwrap().len(), 1);
 
-    assert_eq!(email.call_count(), 1);
-    let calls = email.calls.lock().unwrap();
+    assert_eq!(notifier.call_count(), 1);
+    let calls = notifier.calls.lock().unwrap();
     assert_eq!(calls[0].txn_count, 2);
 }
 
@@ -371,12 +371,12 @@ async fn create_batch_resplits_child_transaction() {
     let api = MockLunchMoney::new(vec![parent, tagged_child, sibling])
         .with_split_ids(vec![vec![300, 301, 302]]);
     let persistence = InMemoryPersistence::new();
-    let email = RecordingEmailSender::new();
+    let notifier = RecordingBatchNotifier::new();
 
     let start = chrono::NaiveDate::from_ymd_opt(2025, 10, 1).unwrap();
     let end = chrono::NaiveDate::from_ymd_opt(2025, 10, 31).unwrap();
 
-    create_batch(start, end, &config, &api, &persistence, &email)
+    create_batch(start, end, &config, &api, &persistence, &notifier)
         .await
         .expect("create_batch should succeed");
 
@@ -412,9 +412,9 @@ async fn create_batch_resplits_child_transaction() {
     assert_eq!(split_items[2].category_id, Some(42));
     assert_eq!(split_items[2].notes, Some("sibling".to_string()));
 
-    // Verify email was sent
-    assert_eq!(email.call_count(), 1);
-    let calls = email.calls.lock().unwrap();
+    // Verify notification was sent
+    assert_eq!(notifier.call_count(), 1);
+    let calls = notifier.calls.lock().unwrap();
     assert_eq!(calls[0].txn_count, 1);
     assert_eq!(calls[0].total, USD::new_from_cents(1000));
 }

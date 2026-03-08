@@ -1,7 +1,7 @@
 use super::LunchMoneyClient;
+use crate::error::Result;
 use crate::lunch_money::model::transaction::{Transaction, TransactionId};
 
-use anyhow::Result;
 use chrono::NaiveDate;
 use serde::Deserialize;
 

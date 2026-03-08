@@ -1,11 +1,10 @@
 use super::LunchMoneyClient;
+use crate::error::{Error, Result};
 use crate::lunch_money::model::transaction::*;
 use crate::usd::USD;
 use chrono::NaiveDate;
 use display_json::DebugAsJson;
 use serde::{Deserialize, Serialize};
-
-use anyhow::{Result, anyhow, bail};
 
 pub type TransactionUpdate = (TransactionId, TransactionUpdateItem);
 
@@ -73,7 +72,7 @@ pub(super) async fn perform_split(
 ) -> Result<SplitResponse> {
     execute(client, update.0, Action::Split(update.1))
         .await?
-        .ok_or_else(|| anyhow!("no split ids found in transaction update that contained splits"))
+        .ok_or_else(|| Error::Api("no split ids found in transaction update that contained splits".to_string()))
 }
 
 pub(super) async fn perform_update_and_split(
@@ -82,7 +81,7 @@ pub(super) async fn perform_update_and_split(
 ) -> Result<SplitResponse> {
     execute(client, update.0, Action::UpdateAndSplit(update.1, update.2))
         .await?
-        .ok_or_else(|| anyhow!("no split ids found in transaction update that contained splits"))
+        .ok_or_else(|| Error::Api("no split ids found in transaction update that contained splits".to_string()))
 }
 
 // Returns Some(SplitResponse) if a split was performed, otherwise None.
@@ -165,17 +164,16 @@ async fn execute(
             if s.updated {
                 Ok(s.split.map(|x| SplitResponse { split_ids: x }))
             } else {
-                bail!("transaction not updated, no error given")
+                Err(Error::Api("transaction not updated, no error given".to_string()))
             }
         }
         Response::Error(e) => {
-            bail!(
-                "{}",
+            Err(Error::Api(
                 e.error
                     .first()
                     .cloned()
-                    .unwrap_or_else(|| format!("unspecified error with response code {}", http_code))
-            )
+                    .unwrap_or_else(|| format!("unspecified error with response code {}", http_code)),
+            ))
         }
     }
 }

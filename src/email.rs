@@ -1,6 +1,6 @@
 use crate::date_helpers;
+use crate::error::{Error, Result};
 use crate::usd::USD;
-use anyhow::Result;
 use askama::Template;
 use async_trait::async_trait;
 use chrono::NaiveDate;
@@ -17,8 +17,8 @@ pub struct Txn {
 }
 
 #[async_trait]
-pub trait EmailSender: Send + Sync {
-    async fn send_batch_emails(
+pub trait BatchNotifier: Send + Sync {
+    async fn send_batch_notification(
         &self,
         batch_id: &str,
         total: &USD,
@@ -27,7 +27,7 @@ pub trait EmailSender: Send + Sync {
     ) -> Result<()>;
 }
 
-pub struct JmapEmailSender {
+pub struct JmapBatchNotifier {
     pub api_session_endpoint: String,
     pub api_key: String,
     pub sent_mailbox: String,
@@ -39,8 +39,8 @@ pub struct JmapEmailSender {
 }
 
 #[async_trait]
-impl EmailSender for JmapEmailSender {
-    async fn send_batch_emails(
+impl BatchNotifier for JmapBatchNotifier {
+    async fn send_batch_notification(
         &self,
         batch_id: &str,
         total: &USD,
@@ -50,7 +50,8 @@ impl EmailSender for JmapEmailSender {
         let client = jmap_client::client::Client::new()
             .credentials(self.api_key.clone())
             .connect(&self.api_session_endpoint)
-            .await?;
+            .await
+            .map_err(|e| Error::Notification(e.to_string()))?;
 
         let mut identity_req = client.build();
         let identity_get_req = identity_req.get_identity();
@@ -59,10 +60,12 @@ impl EmailSender for JmapEmailSender {
 
         let sending_identity = identity_req
             .send()
-            .await?
+            .await
+            .map_err(|e| Error::Notification(e.to_string()))?
             .pop_method_response()
-            .ok_or_else(|| anyhow::anyhow!("get identity response missing"))?
-            .unwrap_get_identity()?
+            .ok_or_else(|| Error::Notification("get identity response missing".to_string()))?
+            .unwrap_get_identity()
+            .map_err(|e| Error::Notification(e.to_string()))?
             .list()
             .iter()
             .filter_map(|x| {
@@ -76,7 +79,9 @@ impl EmailSender for JmapEmailSender {
             })
             .collect::<Vec<String>>()
             .first()
-            .ok_or_else(|| anyhow::anyhow!("no identity matching config's sending address"))?
+            .ok_or_else(|| {
+                Error::Notification("no identity matching config's sending address".to_string())
+            })?
             .clone();
 
         self.send_creditor_email(
@@ -96,7 +101,7 @@ impl EmailSender for JmapEmailSender {
     }
 }
 
-impl JmapEmailSender {
+impl JmapBatchNotifier {
     async fn send_creditor_email(
         &self,
         client: &Client,
@@ -157,27 +162,42 @@ impl JmapEmailSender {
         email.body_value("t2".to_string(), html_text);
         email.html_body(html_body_id);
 
-        let email_response = match email_req.send().await?.pop_method_response() {
+        let email_response = match email_req
+            .send()
+            .await
+            .map_err(|e| Error::Notification(e.to_string()))?
+            .pop_method_response()
+        {
             Some(res) => res.unwrap_method_response(),
             None => {
-                return Err(
-                    anyhow::anyhow!("JMAP create email response did not contain any methodResponses")
-                );
+                return Err(Error::Notification(
+                    "JMAP create email response did not contain any methodResponses".to_string(),
+                ));
             }
         };
 
         let email_id = match email_response {
             SetEmail(mut es) => es
-                .created("m0")?
+                .created("m0")
+                .map_err(|e| Error::Notification(e.to_string()))?
                 .id()
-                .ok_or_else(|| anyhow::anyhow!("didn't find email submission id in response"))?
+                .ok_or_else(|| {
+                    Error::Notification(
+                        "didn't find email submission id in response".to_string(),
+                    )
+                })?
                 .to_string(),
-            _ => return Err(anyhow::anyhow!("JMAP create email response was not of type SetEmail")),
+            _ => {
+                return Err(Error::Notification(
+                    "JMAP create email response was not of type SetEmail".to_string(),
+                ))
+            }
         };
 
         client
             .email_submission_create(email_id, sending_identity.to_string())
-            .await?;
+            .await
+            .map_err(|e| Error::Notification(e.to_string()))?;
 
         tracing::info!(
             to = %self.creditor_email,
@@ -238,27 +258,42 @@ impl JmapEmailSender {
         email.body_value("t2".to_string(), html_text);
         email.html_body(html_body_id);
 
-        let email_response = match email_req.send().await?.pop_method_response() {
+        let email_response = match email_req
+            .send()
+            .await
+            .map_err(|e| Error::Notification(e.to_string()))?
+            .pop_method_response()
+        {
             Some(res) => res.unwrap_method_response(),
             None => {
-                return Err(
-                    anyhow::anyhow!("JMAP create email response did not contain any methodResponses")
-                );
+                return Err(Error::Notification(
+                    "JMAP create email response did not contain any methodResponses".to_string(),
+                ));
             }
         };
 
         let email_id = match email_response {
             SetEmail(mut es) => es
-                .created("m0")?
+                .created("m0")
+                .map_err(|e| Error::Notification(e.to_string()))?
                 .id()
-                .ok_or_else(|| anyhow::anyhow!("didn't find email submission id in response"))?
+                .ok_or_else(|| {
+                    Error::Notification(
+                        "didn't find email submission id in response".to_string(),
+                    )
+                })?
                 .to_string(),
-            _ => return Err(anyhow::anyhow!("JMAP create email response was not of type SetEmail")),
+            _ => {
+                return Err(Error::Notification(
+                    "JMAP create email response was not of type SetEmail".to_string(),
+                ))
+            }
         };
 
         client
             .email_submission_create(email_id, sending_identity.to_string())
-            .await?;
+            .await
+            .map_err(|e| Error::Notification(e.to_string()))?;
 
         tracing::info!(
             to = %self.debtor_email,

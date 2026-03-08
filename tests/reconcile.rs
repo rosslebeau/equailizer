@@ -319,7 +319,7 @@ async fn reconcile_fails_when_no_settlement_credit() {
     .await;
 
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("settlement credit"));
+    assert!(result.unwrap_err().to_string().contains("settlement credit not found"));
 }
 
 #[tokio::test]
@@ -358,7 +358,7 @@ async fn reconcile_all_processes_unreconciled_batches() {
     let persistence =
         InMemoryPersistence::with_batches(vec![unreconciled_batch, already_reconciled]);
 
-    let issues = equailizer::commands::reconcile::reconcile_all(
+    let errors = equailizer::commands::reconcile::reconcile_all(
         &config,
         &creditor_api,
         &debtor_api,
@@ -367,7 +367,7 @@ async fn reconcile_all_processes_unreconciled_batches() {
     .await
     .expect("reconcile_all should succeed");
 
-    assert!(issues.is_empty());
+    assert!(errors.is_empty());
 
     // Only the unreconciled batch should have been processed
     let splits = creditor_api.splits_received.lock().unwrap();
@@ -418,7 +418,7 @@ async fn reconcile_all_continues_after_batch_failure() {
     let persistence =
         InMemoryPersistence::with_batches(vec![failing_batch, succeeding_batch]);
 
-    let issues = equailizer::commands::reconcile::reconcile_all(
+    let errors = equailizer::commands::reconcile::reconcile_all(
         &config,
         &creditor_api,
         &debtor_api,
@@ -427,9 +427,9 @@ async fn reconcile_all_continues_after_batch_failure() {
     .await
     .expect("reconcile_all should succeed even with batch failures");
 
-    // One batch failed, so we should have one issue
-    assert_eq!(issues.len(), 1);
-    assert!(issues[0].to_string().contains("will-fail"));
+    // One batch failed, so we should have one error
+    assert_eq!(errors.len(), 1);
+    assert!(errors[0].to_string().contains("will-fail"));
 
     // The succeeding batch should still be reconciled
     let saved = persistence.saved_batches();

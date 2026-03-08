@@ -4,7 +4,6 @@ name = "equailizer"
 version = "0.1.0"
 
 [dependencies]
-anyhow = "1.0"
 async-trait = "0.1"
 askama = "0.14"
 chrono = { version = "0.4", features = ["serde"] }
@@ -21,6 +20,7 @@ reqwest = { version = "0.12", default-features = false, features = [
 rust_decimal = { version = "1.37", features = ["macros", "serde-with-str"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+thiserror = "2"
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 tracing-appender = "0.2" # for rolling file + non-blocking writer

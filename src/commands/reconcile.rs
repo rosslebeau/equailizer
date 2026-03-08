@@ -1,7 +1,7 @@
 use crate::{
     config::{self, Config},
     date_helpers,
-    issue::Issue,
+    error::{Error, Result},
     lunch_money::{
         api::{
             update_transaction::{SplitUpdateItem, TransactionUpdateItem},
@@ -12,14 +12,13 @@ use crate::{
     persist::{Batch, Persistence, Settlement},
     usd::USD,
 };
-use anyhow::Result;
 
 pub async fn reconcile_all(
     config: &Config,
     creditor_api: &(impl LunchMoney + Sync),
     debtor_api: &(impl LunchMoney + Sync),
     persistence: &(impl Persistence + Sync),
-) -> Result<Vec<Issue>> {
+) -> Result<Vec<Error>> {
     let unreconciled = persistence.unreconciled_batches()?;
     let total = unreconciled.len();
     tracing::info!(unreconciled_batches = total, "Starting reconcile-all");
@@ -30,20 +29,23 @@ pub async fn reconcile_all(
     }
 
     let mut reconciled = 0u32;
-    let mut issues: Vec<Issue> = vec![];
+    let mut errors: Vec<Error> = vec![];
     for batch in unreconciled {
         let batch_id = batch.id.clone();
         match reconcile_batch(batch, config, creditor_api, debtor_api, persistence).await {
             Ok(()) => reconciled += 1,
             Err(e) => {
                 tracing::warn!(batch_id, error = %e, "Failed to reconcile batch");
-                issues.push(Issue::BatchReconcileError(batch_id, format!("{e:#}")));
+                errors.push(Error::BatchReconcile {
+                    batch_id,
+                    source: Box::new(e),
+                });
             }
         }
     }
 
-    tracing::info!(reconciled, failed = issues.len(), total, "Reconcile-all complete");
-    Ok(issues)
+    tracing::info!(reconciled, failed = errors.len(), total, "Reconcile-all complete");
+    Ok(errors)
 }
 
 pub async fn reconcile_batch_name(
@@ -71,7 +73,7 @@ async fn reconcile_batch(
     persistence: &(impl Persistence + Sync),
 ) -> Result<()> {
     if batch.reconciliation.is_some() {
-        anyhow::bail!("batch '{}' is already reconciled", batch.id);
+        return Err(Error::BatchAlreadyReconciled(batch.id));
     }
 
     let span = tracing::info_span!("Reconcile Batch", batch_id = %batch.id);
@@ -93,7 +95,7 @@ async fn reconcile_batch(
         .iter()
         .map(|txn| txn.date)
         .max()
-        .ok_or_else(|| anyhow::anyhow!("no creditor transactions while trying to reconcile"))?;
+        .ok_or(Error::NoTransactionsFound)?;
 
     let search_end = date_helpers::now_date_naive_eastern();
     tracing::debug!(
@@ -111,10 +113,10 @@ async fn reconcile_batch(
         -batch.amount,
         config.creditor.settlement_account_id,
     )
-    .ok_or_else(|| anyhow::anyhow!(
-        "did not find settlement credit for {} in {} creditor transactions (account {})",
-        -batch.amount, creditor_txns.len(), config.creditor.settlement_account_id
-    ))?
+    .ok_or_else(|| Error::SettlementNotFound {
+        side: "credit",
+        batch_id: batch.id.clone(),
+    })?
     .clone();
 
     tracing::info!(
@@ -131,10 +133,10 @@ async fn reconcile_batch(
         batch.amount,
         config.debtor.settlement_account_id,
     )
-    .ok_or_else(|| anyhow::anyhow!(
-        "did not find settlement debit for {} in {} debtor transactions (account {})",
-        batch.amount, debtor_txns.len(), config.debtor.settlement_account_id
-    ))?
+    .ok_or_else(|| Error::SettlementNotFound {
+        side: "debit",
+        batch_id: batch.id.clone(),
+    })?
     .clone();
 
     tracing::info!(

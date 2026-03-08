@@ -1,6 +1,6 @@
+use crate::error::Result;
 use crate::lunch_money::model::transaction::TransactionId;
 use crate::usd::USD;
-use anyhow::{Result, bail};
 use display_json::DebugAsJson;
 use serde::{Deserialize, Serialize};
 use std::{fs, path::PathBuf};
@@ -38,7 +38,11 @@ impl FilePersistence {
 
         if !data_path.is_dir() {
             if data_path.exists() {
-                bail!("cannot create data directory - non-directory file exists at this path");
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    "cannot create data directory - non-directory file exists at this path",
+                )
+                .into());
             } else {
                 fs::create_dir_all(data_path.as_path())?;
             }
@@ -67,8 +71,12 @@ impl Persistence for FilePersistence {
     fn get_batch(&self, batch_name: &str) -> Result<Batch> {
         let file_path = self.data_path.join(format!("{}.json", batch_name));
         tracing::debug!(batch_id = batch_name, path = %file_path.display(), "Loading batch");
-        let file = fs::read_to_string(&file_path)
-            .map_err(|e| anyhow::anyhow!("error reading batch file {}, {}", file_path.display(), e))?;
+        let file = fs::read_to_string(&file_path).map_err(|e| {
+            std::io::Error::new(
+                e.kind(),
+                format!("error reading batch file {}, {}", file_path.display(), e),
+            )
+        })?;
         let parsed: Batch = serde_json::from_str(&file)?;
         Ok(parsed)
     }
@@ -103,7 +111,12 @@ impl Persistence for FilePersistence {
 pub fn base_path() -> Result<PathBuf> {
     let mut base_path = std::env::current_exe()?
         .parent()
-        .ok_or_else(|| anyhow::anyhow!("could not open path of executable"))?
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "could not open path of executable",
+            )
+        })?
         .to_path_buf();
 
     if cfg!(debug_assertions) {

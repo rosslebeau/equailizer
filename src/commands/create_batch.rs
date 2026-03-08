@@ -4,7 +4,8 @@ mod process_tags;
 use crate::commands::create_batch::create_updates::{create_resplit_items, create_updates};
 use crate::commands::create_batch::process_tags::process_tags;
 use crate::config;
-use crate::email::{EmailSender, Txn};
+use crate::email::{BatchNotifier, Txn};
+use crate::error::{Error, Result};
 use crate::issue::Issue;
 use crate::lunch_money::api::update_transaction::{
     TransactionAndSplitUpdate, TransactionUpdate,
@@ -13,7 +14,6 @@ use crate::lunch_money::api::LunchMoney;
 use crate::lunch_money::model::transaction::{Transaction, TransactionId};
 use crate::persist::{Batch, Persistence};
 use crate::usd::USD;
-use anyhow::Result;
 use chrono::NaiveDate;
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -24,13 +24,13 @@ pub async fn create_batch(
     config: &config::Config,
     api: &(impl LunchMoney + Sync),
     persistence: &(impl Persistence + Sync),
-    email: &(impl EmailSender + Sync),
+    notifier: &(impl BatchNotifier + Sync),
 ) -> Result<()> {
     let span = tracing::info_span!("Create Batch");
     let _enter = span.enter();
 
     if start_date.cmp(&end_date) == std::cmp::Ordering::Greater {
-        anyhow::bail!("start date cannot be after end date");
+        return Err(Error::InvalidDateRange);
     }
 
     tracing::info!(
@@ -130,10 +130,10 @@ pub async fn create_batch(
     };
     persistence.save_batch(&batch)?;
 
-    // Send the batch notification email.
+    // Send the batch notification.
     let email_warnings: Vec<String> = issues.iter().map(|i| i.to_string()).collect();
-    email
-        .send_batch_emails(&batch_id, &total_amount, &email_txns, email_warnings)
+    notifier
+        .send_batch_notification(&batch_id, &total_amount, &email_txns, email_warnings)
         .await?;
 
     tracing::info!(
@@ -315,4 +315,3 @@ async fn execute_resplits(
 
     (batched_txn_info, issues)
 }
-

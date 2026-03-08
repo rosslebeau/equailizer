@@ -60,9 +60,9 @@ async fn main() {
                 "Starting command"
             );
             match handle_reconcile_all(profile, dry_run).await {
-                Ok(issues) => {
-                    for issue in &issues {
-                        tracing::warn!("{}", issue);
+                Ok(errors) => {
+                    for error in &errors {
+                        tracing::warn!("{}", error);
                     }
                     tracing::info!("Finished reconcile-all command successfully");
                 }
@@ -94,7 +94,7 @@ async fn handle_create_batch(
     end_date: Option<NaiveDate>,
     profile: String,
     dry_run: bool,
-) -> anyhow::Result<()> {
+) -> equailizer::error::Result<()> {
     let config = equailizer::config::read_config(&profile)?;
     let start_date = cli::start_date_from_args(start);
     let end_date = end_date.or_naive_date_now();
@@ -104,7 +104,7 @@ async fn handle_create_batch(
         dry_run,
     };
     let persistence = equailizer::persist::FilePersistence::new(&profile, dry_run)?;
-    let email_sender = equailizer::email::JmapEmailSender {
+    let notifier = equailizer::email::JmapBatchNotifier {
         api_session_endpoint: config.jmap.api_session_endpoint.clone(),
         api_key: config.jmap.api_key.clone(),
         sent_mailbox: config.jmap.sent_mailbox.clone(),
@@ -121,7 +121,7 @@ async fn handle_create_batch(
         &config,
         &api,
         &persistence,
-        &email_sender,
+        &notifier,
     )
     .await
 }
@@ -130,7 +130,7 @@ async fn handle_reconcile(
     batch_name: String,
     profile: String,
     dry_run: bool,
-) -> anyhow::Result<()> {
+) -> equailizer::error::Result<()> {
     let config = equailizer::config::read_config(&profile)?;
     let creditor_api = LunchMoneyClient {
         auth_token: config.creditor.api_key.clone(),
@@ -152,7 +152,7 @@ async fn handle_reconcile(
     .await
 }
 
-async fn handle_reconcile_all(profile: String, dry_run: bool) -> anyhow::Result<Vec<equailizer::issue::Issue>> {
+async fn handle_reconcile_all(profile: String, dry_run: bool) -> equailizer::error::Result<Vec<equailizer::error::Error>> {
     let config = equailizer::config::read_config(&profile)?;
     let creditor_api = LunchMoneyClient {
         auth_token: config.creditor.api_key.clone(),

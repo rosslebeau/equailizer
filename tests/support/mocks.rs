@@ -1,8 +1,8 @@
-use anyhow::Result;
 use async_trait::async_trait;
 use chrono::NaiveDate;
 use std::sync::Mutex;
 
+use equailizer::error::{Error, Result};
 use equailizer::lunch_money::api::update_transaction::{
     SplitResponse, SplitUpdate, TransactionAndSplitUpdate, TransactionUpdate,
 };
@@ -10,7 +10,7 @@ use equailizer::lunch_money::api::LunchMoney;
 use equailizer::lunch_money::model::transaction::{Transaction, TransactionId};
 use equailizer::persist::{Batch, Persistence};
 use equailizer::usd::USD;
-use equailizer::email::{EmailSender, Txn};
+use equailizer::email::{BatchNotifier, Txn};
 
 // ── MockLunchMoney ──────────────────────────────────────────────────────
 
@@ -59,7 +59,7 @@ impl LunchMoney for MockLunchMoney {
             .iter()
             .find(|t| t.id == id)
             .cloned()
-            .ok_or_else(|| anyhow::anyhow!("mock: transaction {} not found", id))
+            .ok_or_else(|| Error::Api(format!("mock: transaction {} not found", id)))
     }
 
     async fn get_transactions(
@@ -82,7 +82,7 @@ impl LunchMoney for MockLunchMoney {
         let should_fail = self.fail_update_for_ids.lock().unwrap().contains(&update.0);
         self.updates_received.lock().unwrap().push(update);
         if should_fail {
-            anyhow::bail!("mock update failure");
+            return Err(Error::Api("mock update failure".to_string()));
         }
         Ok(())
     }
@@ -189,7 +189,12 @@ impl Persistence for InMemoryPersistence {
                     }
                 }),
             })
-            .ok_or_else(|| anyhow::anyhow!("mock: batch '{}' not found", batch_name))
+            .ok_or_else(|| {
+                Error::Io(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    format!("mock: batch '{}' not found", batch_name),
+                ))
+            })
     }
 
     fn all_batches(&self) -> Result<Vec<Batch>> {
@@ -219,21 +224,21 @@ impl Persistence for InMemoryPersistence {
     }
 }
 
-// ── RecordingEmailSender ────────────────────────────────────────────────
+// ── RecordingBatchNotifier ──────────────────────────────────────────────
 
-/// Records email send calls for assertion. Does not send real emails.
-pub struct RecordingEmailSender {
-    pub calls: Mutex<Vec<EmailSendCall>>,
+/// Records batch notification calls for assertion. Does not send real emails.
+pub struct RecordingBatchNotifier {
+    pub calls: Mutex<Vec<BatchNotification>>,
 }
 
-pub struct EmailSendCall {
+pub struct BatchNotification {
     pub batch_id: String,
     pub total: USD,
     pub txn_count: usize,
     pub warnings: Vec<String>,
 }
 
-impl RecordingEmailSender {
+impl RecordingBatchNotifier {
     pub fn new() -> Self {
         Self {
             calls: Mutex::new(vec![]),
@@ -246,15 +251,15 @@ impl RecordingEmailSender {
 }
 
 #[async_trait]
-impl EmailSender for RecordingEmailSender {
-    async fn send_batch_emails(
+impl BatchNotifier for RecordingBatchNotifier {
+    async fn send_batch_notification(
         &self,
         batch_id: &str,
         total: &USD,
         txns: &[Txn],
         warnings: Vec<String>,
     ) -> Result<()> {
-        self.calls.lock().unwrap().push(EmailSendCall {
+        self.calls.lock().unwrap().push(BatchNotification {
             batch_id: batch_id.to_string(),
             total: *total,
             txn_count: txns.len(),

@@ -6,7 +6,6 @@ pub enum Issue {
     AddTagHasChildren(TransactionId),
     SplitTagHasChildren(TransactionId),
     TransactionUpdateError(TransactionId, String),
-    BatchReconcileError(String, String),
 }
 
 impl fmt::Display for Issue {
@@ -28,9 +27,6 @@ impl fmt::Display for Issue {
             }
             Issue::TransactionUpdateError(txn, e_str) => {
                 write!(f, "Error when updating transaction {}: {}", txn, e_str)
-            }
-            Issue::BatchReconcileError(batch_id, e_str) => {
-                write!(f, "Failed to reconcile batch {}: {}", batch_id, e_str)
             }
         }
     }
