@@ -3,7 +3,7 @@ mod log;
 
 use equailizer::lunch_money::api::LunchMoneyClient;
 use equailizer::lunch_money::model::transaction::TransactionId;
-use equailizer::plugin::protocol::PluginMessage;
+use equailizer_plugin::PluginMessage;
 use equailizer::plugin::PluginManager;
 use equailizer::usd::USD;
 use chrono::NaiveDate;
@@ -107,7 +107,7 @@ async fn main() {
                             for error in &result.errors {
                                 tracing::warn!("{}", error);
                             }
-                            plugins.dispatch(&PluginMessage::reconcile_all_complete(
+                            plugins.dispatch(&equailizer::plugin::reconcile_all_complete_message(
                                 result.reconciled,
                                 &result.errors,
                             )).await;

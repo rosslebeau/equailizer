@@ -1,9 +1,14 @@
+[workspace]
+members = ["equailizer-plugin"]
+default-members = [".", "equailizer-plugin"]
+
 [package]
 edition = "2024"
 name = "equailizer"
 version = "0.1.0"
 
 [dependencies]
+equailizer-plugin = { path = "equailizer-plugin" }
 async-trait = "0.1"
 askama = "0.14"
 chrono = { version = "0.4", features = ["serde"] }

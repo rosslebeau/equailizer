@@ -216,6 +216,45 @@ Report an error (non-fatal to the host). The host logs the message as a warning 
 - Handle `dry_run` from the `initialize` message if your plugin has side effects (e.g., sending notifications). Consider suppressing or labeling actions during dry runs.
 - Handle unknown message types gracefully (respond with `ack`) for forward compatibility.
 
+## Rust SDK (`equailizer-plugin`)
+
+A Rust crate is available for building plugins with typed events and minimal boilerplate. Add it as a dependency:
+
+```toml
+[dependencies]
+equailizer-plugin = { git = "https://github.com/rosslebeau/equailizer", path = "equailizer-plugin" }
+```
+
+The SDK provides a `Plugin` trait with default no-op handlers and a `run()` function that manages the entire JSON Lines protocol lifecycle:
+
+```rust
+use equailizer_plugin::{Plugin, Context, BatchCreated, HandlerResult};
+
+struct SlackNotifier;
+
+impl Plugin for SlackNotifier {
+    fn name(&self) -> &str { "slack-notifier" }
+    fn version(&self) -> &str { "0.1.0" }
+
+    fn on_batch_created(&mut self, ctx: &Context, event: &BatchCreated) -> HandlerResult {
+        if ctx.dry_run { return Ok(()); }
+        eprintln!("Batch {} created: {}", event.batch_id, event.total);
+        Ok(())
+    }
+}
+
+fn main() {
+    if let Err(e) = equailizer_plugin::run(SlackNotifier) {
+        eprintln!("Fatal: {e}");
+        std::process::exit(1);
+    }
+}
+```
+
+Only `name()` and `version()` are required — all event handlers default to no-ops. Returning `Ok(())` sends `ack`; returning `Err(message)` sends an `error` response. The runner handles initialization, shutdown, and unknown message types automatically.
+
+For testing plugins, use `equailizer_plugin::run_with_io(plugin, reader, writer)` with any `BufRead`/`Write` pair.
+
 ## Example Plugin (Python)
 
 A minimal plugin that logs events to a file:

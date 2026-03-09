@@ -13,7 +13,6 @@ use crate::lunch_money::api::update_transaction::{
 use crate::lunch_money::api::LunchMoney;
 use crate::lunch_money::model::transaction::{Transaction, TransactionId};
 use crate::persist::{Batch, Persistence};
-use crate::plugin::protocol::PluginMessage;
 use crate::plugin::PluginManager;
 use crate::usd::USD;
 use chrono::NaiveDate;
@@ -141,7 +140,7 @@ pub async fn create_batch(
 
     // Dispatch to plugins.
     plugins
-        .dispatch(&PluginMessage::batch_created(
+        .dispatch(&crate::plugin::batch_created_message(
             &batch_id,
             &total_amount,
             &email_txns,

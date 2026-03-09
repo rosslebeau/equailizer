@@ -1,8 +1,12 @@
-pub mod protocol;
-
-use protocol::{PluginMessage, PluginResponse};
+use equailizer_plugin::protocol::{
+    BatchReconcileError, PluginMessage, PluginResponse, Transaction,
+};
 
 use crate::config::PluginEntry;
+use crate::email::Txn;
+use crate::error::Error;
+use crate::persist::Batch;
+use crate::usd::USD;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::process::{Child, ChildStdin, ChildStdout};
 
@@ -22,6 +26,68 @@ struct PluginProcess {
 pub struct PluginManager {
     plugins: Vec<PluginProcess>,
 }
+
+// ── Domain → protocol conversion functions ──
+
+pub fn batch_created_message(
+    batch_id: &str,
+    total: &USD,
+    txns: &[Txn],
+    warnings: &[String],
+) -> PluginMessage {
+    PluginMessage::BatchCreated {
+        batch_id: batch_id.to_string(),
+        total: total.to_string(),
+        transactions: txns
+            .iter()
+            .map(|t| Transaction {
+                payee: t.payee.clone(),
+                amount: t.amount.to_string(),
+                date: t.date,
+                notes: t.notes.clone(),
+            })
+            .collect(),
+        warnings: warnings.to_vec(),
+    }
+}
+
+pub fn batch_reconciled_message(
+    batch: &Batch,
+    settlement_credit_id: u32,
+    settlement_debit_id: u32,
+) -> PluginMessage {
+    PluginMessage::BatchReconciled {
+        batch_id: batch.id.clone(),
+        amount: batch.amount.to_string(),
+        settlement_credit_id,
+        settlement_debit_id,
+    }
+}
+
+pub fn reconcile_all_complete_message(
+    reconciled_count: u32,
+    errors: &[Error],
+) -> PluginMessage {
+    PluginMessage::ReconcileAllComplete {
+        reconciled_count,
+        failed_count: errors.len() as u32,
+        errors: errors
+            .iter()
+            .map(|e| match e {
+                Error::BatchReconcile { batch_id, source } => BatchReconcileError {
+                    batch_id: batch_id.clone(),
+                    error: source.to_string(),
+                },
+                other => BatchReconcileError {
+                    batch_id: String::new(),
+                    error: other.to_string(),
+                },
+            })
+            .collect(),
+    }
+}
+
+// ── Plugin manager ──
 
 impl PluginManager {
     /// Start all configured notification plugins. Failures during startup are

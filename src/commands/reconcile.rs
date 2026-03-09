@@ -10,7 +10,6 @@ use crate::{
         model::transaction::{Transaction, TransactionId, TransactionStatus},
     },
     persist::{Batch, Persistence, Settlement},
-    plugin::protocol::PluginMessage,
     plugin::PluginManager,
     usd::USD,
 };
@@ -186,7 +185,7 @@ async fn reconcile_batch(
 
     // Dispatch to plugins before saving (which moves batch fields).
     plugins
-        .dispatch(&PluginMessage::batch_reconciled(
+        .dispatch(&crate::plugin::batch_reconciled_message(
             &batch,
             settlement_credit.id,
             settlement_debit.id,
