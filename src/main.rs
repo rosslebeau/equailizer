@@ -157,10 +157,7 @@ async fn handle_create_batch(
     let start_date = cli::start_date_from_args(start);
     let end_date = end_date.or_naive_date_now();
 
-    let api = LunchMoneyClient {
-        auth_token: config.creditor.api_key.clone(),
-        dry_run,
-    };
+    let api = LunchMoneyClient::new(config.creditor.api_key.clone(), dry_run);
     let persistence = equailizer::persist::FilePersistence::new(profile, dry_run)?;
     let notifier = equailizer::email::JmapBatchNotifier {
         api_session_endpoint: config.jmap.api_session_endpoint.clone(),
@@ -192,14 +189,8 @@ async fn handle_reconcile(
     dry_run: bool,
     plugins: &mut PluginManager,
 ) -> equailizer::error::Result<()> {
-    let creditor_api = LunchMoneyClient {
-        auth_token: config.creditor.api_key.clone(),
-        dry_run,
-    };
-    let debtor_api = LunchMoneyClient {
-        auth_token: config.debtor.api_key.clone(),
-        dry_run,
-    };
+    let creditor_api = LunchMoneyClient::new(config.creditor.api_key.clone(), dry_run);
+    let debtor_api = LunchMoneyClient::new(config.debtor.api_key.clone(), dry_run);
     let persistence = equailizer::persist::FilePersistence::new(profile, dry_run)?;
 
     equailizer::commands::reconcile::reconcile_batch_name(
@@ -219,14 +210,8 @@ async fn handle_reconcile_all(
     dry_run: bool,
     plugins: &mut PluginManager,
 ) -> equailizer::error::Result<equailizer::commands::reconcile::ReconcileAllResult> {
-    let creditor_api = LunchMoneyClient {
-        auth_token: config.creditor.api_key.clone(),
-        dry_run,
-    };
-    let debtor_api = LunchMoneyClient {
-        auth_token: config.debtor.api_key.clone(),
-        dry_run,
-    };
+    let creditor_api = LunchMoneyClient::new(config.creditor.api_key.clone(), dry_run);
+    let debtor_api = LunchMoneyClient::new(config.debtor.api_key.clone(), dry_run);
     let persistence = equailizer::persist::FilePersistence::new(profile, dry_run)?;
 
     equailizer::commands::reconcile::reconcile_all(
@@ -327,10 +312,7 @@ fn handle_dev_email() {
 async fn handle_dev_txn(id: TransactionId, profile: String) {
     use equailizer::lunch_money::api::LunchMoney;
     let config = equailizer::config::read_config(&profile).expect("failed reading config");
-    let client = LunchMoneyClient {
-        auth_token: config.creditor.api_key.to_owned(),
-        dry_run: false,
-    };
+    let client = LunchMoneyClient::new(config.creditor.api_key.to_owned(), false);
     let txn = client
         .get_transaction(id)
         .await
@@ -341,10 +323,7 @@ async fn handle_dev_txn(id: TransactionId, profile: String) {
 async fn handle_dev_split_children(id: TransactionId, profile: String) {
     use equailizer::lunch_money::api::LunchMoney;
     let config = equailizer::config::read_config(&profile).expect("failed reading config");
-    let client = LunchMoneyClient {
-        auth_token: config.creditor.api_key.to_owned(),
-        dry_run: false,
-    };
+    let client = LunchMoneyClient::new(config.creditor.api_key.to_owned(), false);
 
     let parent = client
         .get_transaction(id)

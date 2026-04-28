@@ -1,9 +1,11 @@
 use super::LunchMoneyClient;
-use crate::error::Result;
+use super::http::body_snippet;
+use crate::error::{Error, Result};
 use crate::lunch_money::model::transaction::{Transaction, TransactionId};
 
 use chrono::NaiveDate;
-use serde::Deserialize;
+use reqwest::StatusCode;
+use serde::{de::DeserializeOwned, Deserialize};
 
 const PAGE_LIMIT: u32 = 1000;
 
@@ -13,20 +15,36 @@ struct TransactionsResponse {
     has_more: bool,
 }
 
+fn decode_or_api_error<T: DeserializeOwned>(
+    status: StatusCode,
+    body: &str,
+    context: &str,
+) -> Result<T> {
+    if !status.is_success() {
+        return Err(Error::Api(format!(
+            "{context}: HTTP {status}: {}",
+            body_snippet(body)
+        )));
+    }
+
+    serde_json::from_str::<T>(body).map_err(|e| {
+        Error::Api(format!(
+            "{context}: failed to decode HTTP {status} response ({e}): {}",
+            body_snippet(body)
+        ))
+    })
+}
+
 pub(super) async fn get_single(client: &LunchMoneyClient, id: TransactionId) -> Result<Transaction> {
-    let auth_header = format!("Bearer {}", client.auth_token);
-
     let url = format!("https://dev.lunchmoney.app/v1/transactions/{}", id);
-    let http = reqwest::Client::new();
-    let response: Transaction = http
+    let request = client
+        .http
+        .client()
         .get(url)
-        .header("Authorization", auth_header)
-        .send()
-        .await?
-        .json()
-        .await?;
+        .header("Authorization", format!("Bearer {}", client.auth_token));
 
-    Ok(response)
+    let raw = client.http.send(request).await?;
+    decode_or_api_error::<Transaction>(raw.status, &raw.body, &format!("get transaction {id}"))
 }
 
 // The Lunch Money API does not currently have a way to request multiple transactions by id in a single call.
@@ -56,12 +74,13 @@ pub(super) async fn get_by_date_range(
     );
 
     let auth_header = format!("Bearer {}", client.auth_token);
-    let http = reqwest::Client::new();
     let mut all_transactions: Vec<Transaction> = Vec::new();
     let mut offset: u32 = 0;
 
     loop {
-        let response: TransactionsResponse = http
+        let request = client
+            .http
+            .client()
             .get("https://dev.lunchmoney.app/v1/transactions")
             .query(&[
                 ("start_date", &start_date.to_string()),
@@ -69,11 +88,18 @@ pub(super) async fn get_by_date_range(
                 ("limit", &PAGE_LIMIT.to_string()),
                 ("offset", &offset.to_string()),
             ])
-            .header("Authorization", &auth_header)
-            .send()
-            .await?
-            .json()
-            .await?;
+            .header("Authorization", &auth_header);
+
+        let raw = client.http.send(request).await?;
+        let response: TransactionsResponse = decode_or_api_error(
+            raw.status,
+            &raw.body,
+            &format!(
+                "get transactions {} to {} (offset {offset})",
+                start_date.format("%Y-%m-%d"),
+                end_date.format("%Y-%m-%d")
+            ),
+        )?;
 
         let page_count = response.transactions.len() as u32;
         let has_more = response.has_more;

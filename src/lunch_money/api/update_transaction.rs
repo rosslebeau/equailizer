@@ -1,4 +1,5 @@
 use super::LunchMoneyClient;
+use super::http::body_snippet;
 use crate::error::{Error, Result};
 use crate::lunch_money::model::transaction::*;
 use crate::usd::USD;
@@ -140,18 +141,22 @@ async fn execute(
         }));
     }
 
-    let http = reqwest::Client::new();
-    let auth_header = format!("Bearer {}", client.auth_token);
     let url = format!("https://dev.lunchmoney.app/v1/transactions/{}", txn_id);
-    let response = http
+    let request = client
+        .http
+        .client()
         .put(url)
-        .header("Authorization", auth_header)
-        .json(&txn_update_body)
-        .send()
-        .await?;
+        .header("Authorization", format!("Bearer {}", client.auth_token))
+        .json(&txn_update_body);
 
-    let http_code = response.status();
-    let response: Response = response.json().await?;
+    let raw = client.http.send(request).await?;
+    let http_code = raw.status;
+    let response: Response = serde_json::from_str(&raw.body).map_err(|e| {
+        Error::Api(format!(
+            "update transaction {txn_id}: failed to decode HTTP {http_code} response ({e}): {}",
+            body_snippet(&raw.body)
+        ))
+    })?;
 
     tracing::debug!(
         ?http_code,

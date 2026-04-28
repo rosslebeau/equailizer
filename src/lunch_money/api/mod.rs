@@ -1,4 +1,5 @@
 pub mod get_transactions;
+pub mod http;
 pub mod update_transaction;
 
 use crate::error::Result;
@@ -6,6 +7,7 @@ use async_trait::async_trait;
 use chrono::NaiveDate;
 
 use super::model::transaction::{Transaction, TransactionId};
+use http::RateLimitedHttp;
 pub use update_transaction::{
     SplitResponse, SplitUpdate, TransactionAndSplitUpdate, TransactionUpdate,
 };
@@ -30,6 +32,17 @@ pub trait LunchMoney: Send + Sync {
 pub struct LunchMoneyClient {
     pub auth_token: String,
     pub dry_run: bool,
+    pub(crate) http: RateLimitedHttp,
+}
+
+impl LunchMoneyClient {
+    pub fn new(auth_token: String, dry_run: bool) -> Self {
+        Self {
+            auth_token,
+            dry_run,
+            http: RateLimitedHttp::default(),
+        }
+    }
 }
 
 #[async_trait]
