@@ -27,6 +27,7 @@ pub trait LunchMoney: Send + Sync {
         &self,
         update: TransactionAndSplitUpdate,
     ) -> Result<SplitResponse>;
+    async fn unsplit_transaction(&self, parent_id: TransactionId) -> Result<Vec<TransactionId>>;
 }
 
 pub struct LunchMoneyClient {
@@ -76,5 +77,9 @@ impl LunchMoney for LunchMoneyClient {
         update: TransactionAndSplitUpdate,
     ) -> Result<SplitResponse> {
         update_transaction::perform_update_and_split(self, update).await
+    }
+
+    async fn unsplit_transaction(&self, parent_id: TransactionId) -> Result<Vec<TransactionId>> {
+        update_transaction::perform_unsplit(self, parent_id).await
     }
 }

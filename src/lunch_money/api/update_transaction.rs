@@ -85,6 +85,64 @@ pub(super) async fn perform_update_and_split(
         .ok_or_else(|| Error::Api("no split ids found in transaction update that contained splits".to_string()))
 }
 
+pub(super) async fn perform_unsplit(
+    client: &LunchMoneyClient,
+    parent_id: TransactionId,
+) -> Result<Vec<TransactionId>> {
+    #[derive(Debug, Serialize)]
+    struct RequestBody {
+        parent_ids: Vec<TransactionId>,
+        remove_parents: bool,
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[serde(untagged)]
+    enum Response {
+        Success(Vec<TransactionId>),
+        Error { error: Vec<String> },
+    }
+
+    let body = RequestBody {
+        parent_ids: vec![parent_id],
+        remove_parents: false,
+    };
+
+    tracing::debug!(parent_id, ?body, "Unsplitting transaction");
+
+    if client.dry_run {
+        return Ok(vec![]);
+    }
+
+    let url = "https://dev.lunchmoney.app/v1/transactions/unsplit";
+    let request = client
+        .http
+        .client()
+        .post(url)
+        .header("Authorization", format!("Bearer {}", client.auth_token))
+        .json(&body);
+
+    let raw = client.http.send(request).await?;
+    let http_code = raw.status;
+    let response: Response = serde_json::from_str(&raw.body).map_err(|e| {
+        Error::Api(format!(
+            "unsplit transaction {parent_id}: failed to decode HTTP {http_code} response ({e}): {}",
+            body_snippet(&raw.body)
+        ))
+    })?;
+
+    tracing::debug!(?http_code, ?response, "Received unsplit response");
+
+    match response {
+        Response::Success(deleted_ids) => Ok(deleted_ids),
+        Response::Error { error } => Err(Error::Api(
+            error
+                .first()
+                .cloned()
+                .unwrap_or_else(|| format!("unspecified unsplit error with response code {}", http_code)),
+        )),
+    }
+}
+
 // Returns Some(SplitResponse) if a split was performed, otherwise None.
 async fn execute(
     client: &LunchMoneyClient,
@@ -136,9 +194,13 @@ async fn execute(
     tracing::debug!(txn_id, ?txn_update_body, "Updating transaction");
 
     if client.dry_run {
-        return Ok(Some(SplitResponse {
-            split_ids: vec![0, 1],
-        }));
+        let split_ids = match &action {
+            Action::Update(_) => return Ok(None),
+            Action::Split(splits) | Action::UpdateAndSplit(_, splits) => {
+                (0..splits.len() as TransactionId).collect()
+            }
+        };
+        return Ok(Some(SplitResponse { split_ids }));
     }
 
     let url = format!("https://dev.lunchmoney.app/v1/transactions/{}", txn_id);

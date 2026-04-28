@@ -22,9 +22,12 @@ pub struct MockLunchMoney {
     pub transactions: Vec<Transaction>,
     pub next_split_ids: Mutex<Vec<Vec<TransactionId>>>,
     pub fail_update_for_ids: Mutex<Vec<TransactionId>>,
+    pub fail_split_for_parent_ids: Mutex<Vec<TransactionId>>,
+    pub fail_unsplit_for_parent_ids: Mutex<Vec<TransactionId>>,
     pub updates_received: Mutex<Vec<TransactionUpdate>>,
     pub splits_received: Mutex<Vec<SplitUpdate>>,
     pub update_and_splits_received: Mutex<Vec<TransactionAndSplitUpdate>>,
+    pub unsplits_received: Mutex<Vec<TransactionId>>,
 }
 
 impl MockLunchMoney {
@@ -33,9 +36,12 @@ impl MockLunchMoney {
             transactions,
             next_split_ids: Mutex::new(vec![]),
             fail_update_for_ids: Mutex::new(vec![]),
+            fail_split_for_parent_ids: Mutex::new(vec![]),
+            fail_unsplit_for_parent_ids: Mutex::new(vec![]),
             updates_received: Mutex::new(vec![]),
             splits_received: Mutex::new(vec![]),
             update_and_splits_received: Mutex::new(vec![]),
+            unsplits_received: Mutex::new(vec![]),
         }
     }
 
@@ -48,6 +54,18 @@ impl MockLunchMoney {
     /// Make `update_transaction` return an error for the given transaction IDs.
     pub fn with_failing_updates(self, ids: Vec<TransactionId>) -> Self {
         *self.fail_update_for_ids.lock().unwrap() = ids;
+        self
+    }
+
+    /// Make `update_split` return an error for the given parent IDs.
+    pub fn with_failing_splits(self, parent_ids: Vec<TransactionId>) -> Self {
+        *self.fail_split_for_parent_ids.lock().unwrap() = parent_ids;
+        self
+    }
+
+    /// Make `unsplit_transaction` return an error for the given parent IDs.
+    pub fn with_failing_unsplits(self, parent_ids: Vec<TransactionId>) -> Self {
+        *self.fail_unsplit_for_parent_ids.lock().unwrap() = parent_ids;
         self
     }
 }
@@ -88,7 +106,16 @@ impl LunchMoney for MockLunchMoney {
     }
 
     async fn update_split(&self, update: SplitUpdate) -> Result<SplitResponse> {
+        let parent_id = update.0;
+        let should_fail = self
+            .fail_split_for_parent_ids
+            .lock()
+            .unwrap()
+            .contains(&parent_id);
         self.splits_received.lock().unwrap().push(update);
+        if should_fail {
+            return Err(Error::Api("mock split failure".to_string()));
+        }
         let ids = self
             .next_split_ids
             .lock()
@@ -113,6 +140,19 @@ impl LunchMoney for MockLunchMoney {
             .pop()
             .unwrap_or_else(|| vec![100, 101]);
         Ok(SplitResponse { split_ids: ids })
+    }
+
+    async fn unsplit_transaction(&self, parent_id: TransactionId) -> Result<Vec<TransactionId>> {
+        let should_fail = self
+            .fail_unsplit_for_parent_ids
+            .lock()
+            .unwrap()
+            .contains(&parent_id);
+        self.unsplits_received.lock().unwrap().push(parent_id);
+        if should_fail {
+            return Err(Error::Api("mock unsplit failure".to_string()));
+        }
+        Ok(vec![])
     }
 }
 

@@ -285,6 +285,18 @@ async fn execute_resplits(
         let (split_items, debtor_amounts) =
             create_resplit_items(&tagged_children, &siblings, proxy_category_id);
 
+        // Lunch Money rejects splitting an already-split transaction, so unsplit
+        // the parent first. After this succeeds, any failure of update_split
+        // leaves the parent in a no-children state requiring manual repair.
+        if let Err(e) = api.unsplit_transaction(parent_id).await {
+            tracing::warn!(parent_id, error = %e, "Failed to unsplit parent before resplit");
+            let msg = e.to_string();
+            for child in &tagged_children {
+                issues.push(Issue::TransactionUpdateError(child.id, msg.clone()));
+            }
+            continue;
+        }
+
         let result = api.update_split((parent_id, split_items)).await;
 
         match result {
@@ -317,7 +329,11 @@ async fn execute_resplits(
             }
             Err(e) => {
                 let msg = e.to_string();
-                tracing::warn!(parent_id, error = %msg, "Failed to resplit parent transaction");
+                tracing::error!(
+                    parent_id,
+                    error = %msg,
+                    "Resplit failed AFTER unsplit succeeded — parent now has no children. Manual repair required: re-tag the parent or restore splits in Lunch Money UI."
+                );
                 for child in &tagged_children {
                     issues.push(Issue::TransactionUpdateError(child.id, msg.clone()));
                 }

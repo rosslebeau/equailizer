@@ -389,6 +389,11 @@ async fn create_batch_resplits_child_transaction() {
     assert_eq!(batch.amount, USD::new_from_cents(1000)); // half of 2000
     assert_eq!(batch.transaction_ids, vec![301]); // debtor half ID
 
+    // Verify the parent was unsplit before resplit
+    let unsplits = api.unsplits_received.lock().unwrap();
+    assert_eq!(unsplits.len(), 1);
+    assert_eq!(unsplits[0], 100);
+
     // Verify update_split was called on the parent (not update_transaction_and_split)
     let splits = api.splits_received.lock().unwrap();
     assert_eq!(splits.len(), 1);
@@ -419,4 +424,102 @@ async fn create_batch_resplits_child_transaction() {
     let calls = notifier.calls.lock().unwrap();
     assert_eq!(calls[0].txn_count, 1);
     assert_eq!(calls[0].total, USD::new_from_cents(1000));
+}
+
+#[tokio::test]
+async fn create_batch_resplit_skips_when_unsplit_fails() {
+    let config = test_config();
+
+    let parent = test_transaction(100, 3000)
+        .with_children()
+        .with_date(2025, 10, 1)
+        .with_payee("Restaurant");
+    let tagged_child = test_transaction(20, 2000)
+        .with_parent(100)
+        .with_tags(vec![("eq-to-split", 11)])
+        .with_date(2025, 10, 1)
+        .with_payee("Restaurant")
+        .with_category(42, "Dining");
+    let sibling = test_transaction(21, 1000)
+        .with_parent(100)
+        .with_date(2025, 10, 1)
+        .with_payee("Restaurant")
+        .with_category(42, "Dining");
+
+    let api = MockLunchMoney::new(vec![parent, tagged_child, sibling])
+        .with_failing_unsplits(vec![100]);
+    let persistence = InMemoryPersistence::new();
+    let notifier = RecordingBatchNotifier::new();
+
+    let start = chrono::NaiveDate::from_ymd_opt(2025, 10, 1).unwrap();
+    let end = chrono::NaiveDate::from_ymd_opt(2025, 10, 31).unwrap();
+
+    create_batch(start, end, &config, &api, &persistence, &notifier, &mut PluginManager::empty())
+        .await
+        .expect("create_batch should succeed even if a resplit fails");
+
+    // Unsplit was attempted but failed; update_split must NOT be called.
+    assert_eq!(api.unsplits_received.lock().unwrap().len(), 1);
+    assert_eq!(api.splits_received.lock().unwrap().len(), 0);
+
+    // Batch was still saved (with no transactions from the failed resplit).
+    let batches = persistence.saved_batches();
+    assert_eq!(batches.len(), 1);
+    assert!(batches[0].transaction_ids.is_empty());
+
+    // Notification fired with a warning about the failure.
+    let calls = notifier.calls.lock().unwrap();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].txn_count, 0);
+    assert_eq!(calls[0].warnings.len(), 1);
+    assert!(calls[0].warnings[0].contains("mock unsplit failure"));
+}
+
+#[tokio::test]
+async fn create_batch_resplit_logs_failure_when_split_fails_after_unsplit() {
+    let config = test_config();
+
+    let parent = test_transaction(100, 3000)
+        .with_children()
+        .with_date(2025, 10, 1)
+        .with_payee("Restaurant");
+    let tagged_child = test_transaction(20, 2000)
+        .with_parent(100)
+        .with_tags(vec![("eq-to-split", 11)])
+        .with_date(2025, 10, 1)
+        .with_payee("Restaurant")
+        .with_category(42, "Dining");
+    let sibling = test_transaction(21, 1000)
+        .with_parent(100)
+        .with_date(2025, 10, 1)
+        .with_payee("Restaurant")
+        .with_category(42, "Dining");
+
+    // Unsplit succeeds (default), but update_split fails.
+    let api = MockLunchMoney::new(vec![parent, tagged_child, sibling])
+        .with_failing_splits(vec![100]);
+    let persistence = InMemoryPersistence::new();
+    let notifier = RecordingBatchNotifier::new();
+
+    let start = chrono::NaiveDate::from_ymd_opt(2025, 10, 1).unwrap();
+    let end = chrono::NaiveDate::from_ymd_opt(2025, 10, 31).unwrap();
+
+    create_batch(start, end, &config, &api, &persistence, &notifier, &mut PluginManager::empty())
+        .await
+        .expect("create_batch should succeed even if split fails after unsplit");
+
+    // Both unsplit and split were attempted.
+    assert_eq!(api.unsplits_received.lock().unwrap().len(), 1);
+    assert_eq!(api.splits_received.lock().unwrap().len(), 1);
+
+    // No transactions made it into the batch.
+    let batches = persistence.saved_batches();
+    assert_eq!(batches.len(), 1);
+    assert!(batches[0].transaction_ids.is_empty());
+
+    // Notification fired with a warning about the failure.
+    let calls = notifier.calls.lock().unwrap();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].warnings.len(), 1);
+    assert!(calls[0].warnings[0].contains("mock split failure"));
 }
