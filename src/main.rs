@@ -140,6 +140,15 @@ async fn main() {
                 tracing::info!("dev split-children command");
                 handle_dev_split_children(id, profile).await;
             }
+            cli::DevSubcommand::List {
+                profile,
+                start,
+                end,
+                uncleared_only,
+            } => {
+                tracing::info!("dev list command");
+                handle_dev_list(profile, start, end, uncleared_only).await;
+            }
         },
     }
 
@@ -372,4 +381,42 @@ async fn handle_dev_split_children(id: TransactionId, profile: String) {
     }
 
     tracing::info!(count = children.len(), "Total children found");
+}
+
+async fn handle_dev_list(
+    profile: String,
+    start: chrono::NaiveDate,
+    end: chrono::NaiveDate,
+    uncleared_only: bool,
+) {
+    use equailizer::lunch_money::api::LunchMoney;
+    use equailizer::lunch_money::model::transaction::TransactionStatus;
+
+    let config = equailizer::config::read_config(&profile).expect("failed reading config");
+    let client = LunchMoneyClient::new(config.creditor.api_key.to_owned(), false);
+
+    let txns = client
+        .get_transactions(start, end)
+        .await
+        .expect("failed getting transactions");
+
+    let filtered: Vec<_> = txns
+        .iter()
+        .filter(|t| !uncleared_only || t.status == TransactionStatus::Uncleared)
+        .collect();
+
+    for t in &filtered {
+        tracing::info!(
+            id = t.id,
+            date = %t.date,
+            amount = %t.amount,
+            payee = %t.payee,
+            parent_id = ?t.parent_id,
+            has_children = t.has_children,
+            status = ?t.status,
+            "Transaction"
+        );
+    }
+
+    tracing::info!(count = filtered.len(), "Total transactions listed");
 }

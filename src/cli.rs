@@ -78,6 +78,16 @@ pub enum DevSubcommand {
         #[arg(required = true, long = "profile", short = 'p')]
         profile: String,
     },
+    List {
+        #[arg(required = true, long = "profile", short = 'p')]
+        profile: String,
+        #[arg(required = true, long = "start", short = 's', value_name = "yyyy-mm-dd")]
+        start: NaiveDate,
+        #[arg(required = true, long = "end", short = 'e', value_name = "yyyy-mm-dd")]
+        end: NaiveDate,
+        #[arg(long = "uncleared-only", short = 'u', action = ArgAction::SetTrue)]
+        uncleared_only: bool,
+    },
 }
 
 pub fn start_date_from_args(args: StartArgs) -> NaiveDate {
