@@ -1,7 +1,8 @@
 mod support;
 
 use equailizer::commands::reconcile::{
-    build_creditor_splits, build_debtor_splits, find_settlement_transaction,
+    build_creditor_splits, build_debtor_splits, find_existing_split_children,
+    find_settlement_transaction,
 };
 use equailizer::config::{self, Config, Creditor, Debtor, JMAP};
 use equailizer::lunch_money::api::update_transaction::TransactionUpdateItem;
@@ -180,12 +181,14 @@ async fn reconcile_batch_end_to_end() {
     // Settlement credit on creditor side: negative batch amount (-4000) in settlement account
     let settlement_credit = test_transaction(50, -4000)
         .with_account(1000)
-        .with_date(2025, 3, 5);
+        .with_date(2025, 3, 5)
+        .with_status(TransactionStatus::Uncleared);
 
     // Settlement debit on debtor side: positive batch amount (4000) in settlement account
     let settlement_debit = test_transaction(60, 4000)
         .with_account(2000)
-        .with_date(2025, 3, 5);
+        .with_date(2025, 3, 5)
+        .with_status(TransactionStatus::Uncleared);
 
     let creditor_api =
         MockLunchMoney::new(vec![batch_txn_1, batch_txn_2, settlement_credit]);
@@ -465,10 +468,12 @@ async fn reconcile_removes_pending_tag_from_batch_transactions() {
 
     let settlement_credit = test_transaction(50, -4000)
         .with_account(1000)
-        .with_date(2025, 3, 5);
+        .with_date(2025, 3, 5)
+        .with_status(TransactionStatus::Uncleared);
     let settlement_debit = test_transaction(60, 4000)
         .with_account(2000)
-        .with_date(2025, 3, 5);
+        .with_date(2025, 3, 5)
+        .with_status(TransactionStatus::Uncleared);
 
     let creditor_api =
         MockLunchMoney::new(vec![batch_txn_1, batch_txn_2, settlement_credit]);
@@ -513,3 +518,531 @@ async fn reconcile_removes_pending_tag_from_batch_transactions() {
     assert_eq!(updates[4].0, 11);
     assert_eq!(updates[4].1.tags, Some(vec!["external-tag".to_string()]));
 }
+
+// ── find_existing_split_children pure function tests ─────────────────────
+
+#[test]
+fn find_existing_children_returns_matches() {
+    let candidates = vec![
+        test_transaction(100, -500).with_parent(50),
+        test_transaction(101, -600).with_parent(50),
+        test_transaction(102, -700).with_parent(50),
+        test_transaction(999, -123), // unrelated, no parent
+    ];
+
+    let result = find_existing_split_children(&candidates, 50, 3).unwrap();
+    assert_eq!(result.len(), 3);
+    assert_eq!(result[0].id, 100);
+    assert_eq!(result[1].id, 101);
+    assert_eq!(result[2].id, 102);
+}
+
+#[test]
+fn find_existing_children_count_mismatch_too_few() {
+    let candidates = vec![
+        test_transaction(100, -500).with_parent(50),
+        test_transaction(101, -600).with_parent(50),
+    ];
+
+    let result = find_existing_split_children(&candidates, 50, 3);
+    let err = result.unwrap_err().to_string();
+    assert!(err.contains("expected 3"), "error message was: {err}");
+    assert!(err.contains("found 2"), "error message was: {err}");
+}
+
+#[test]
+fn find_existing_children_count_mismatch_too_many() {
+    let candidates = vec![
+        test_transaction(100, -500).with_parent(50),
+        test_transaction(101, -600).with_parent(50),
+        test_transaction(102, -700).with_parent(50),
+        test_transaction(103, -800).with_parent(50),
+    ];
+
+    let result = find_existing_split_children(&candidates, 50, 3);
+    let err = result.unwrap_err().to_string();
+    assert!(err.contains("expected 3"), "error message was: {err}");
+    assert!(err.contains("found 4"), "error message was: {err}");
+}
+
+#[test]
+fn find_existing_children_zero_expected() {
+    let candidates = vec![test_transaction(999, -123)]; // unrelated txn
+
+    let result = find_existing_split_children(&candidates, 50, 0).unwrap();
+    assert!(result.is_empty());
+}
+
+#[test]
+fn find_existing_children_ignores_other_parents() {
+    let candidates = vec![
+        test_transaction(100, -500).with_parent(50),
+        test_transaction(101, -600).with_parent(77), // different parent
+        test_transaction(102, -700).with_parent(50),
+        test_transaction(103, -800).with_parent(99), // different parent
+    ];
+
+    let result = find_existing_split_children(&candidates, 50, 2).unwrap();
+    assert_eq!(result.len(), 2);
+    assert_eq!(result[0].id, 100);
+    assert_eq!(result[1].id, 102);
+}
+
+// ── Idempotency / recovery orchestration tests ───────────────────────────
+
+#[tokio::test]
+async fn reconcile_skips_split_when_creditor_settlement_already_split() {
+    let config = test_config();
+
+    let batch_txn_1 = test_transaction(10, 1500)
+        .with_payee("Store A")
+        .with_date(2025, 3, 1);
+    let batch_txn_2 = test_transaction(11, 2500)
+        .with_payee("Store B")
+        .with_date(2025, 3, 2);
+
+    // Creditor settlement already split, but parent not yet cleared.
+    let settlement_credit = test_transaction(50, -4000)
+        .with_account(1000)
+        .with_date(2025, 3, 5)
+        .with_children()
+        .with_status(TransactionStatus::Uncleared);
+    // Existing split children attached to settlement 50, both uncleared.
+    let existing_child_1 = test_transaction(500, -1500)
+        .with_parent(50)
+        .with_date(2025, 3, 1)
+        .with_status(TransactionStatus::Uncleared);
+    let existing_child_2 = test_transaction(501, -2500)
+        .with_parent(50)
+        .with_date(2025, 3, 2)
+        .with_status(TransactionStatus::Uncleared);
+
+    // Debtor side: fresh, not yet split or cleared.
+    let settlement_debit = test_transaction(60, 4000)
+        .with_account(2000)
+        .with_date(2025, 3, 5)
+        .with_status(TransactionStatus::Uncleared);
+
+    let creditor_api = MockLunchMoney::new(vec![
+        batch_txn_1,
+        batch_txn_2,
+        settlement_credit,
+        existing_child_1,
+        existing_child_2,
+    ]);
+    let debtor_api = MockLunchMoney::new(vec![settlement_debit]);
+
+    let batch = Batch {
+        id: "recovery-creditor".to_string(),
+        amount: USD::new_from_cents(4000),
+        transaction_ids: vec![10, 11],
+        reconciliation: None,
+    };
+    let persistence = InMemoryPersistence::with_batches(vec![batch]);
+
+    equailizer::commands::reconcile::reconcile_batch_name(
+        "recovery-creditor",
+        &config,
+        &creditor_api,
+        &debtor_api,
+        &persistence,
+        &mut PluginManager::empty(),
+    )
+    .await
+    .expect("reconcile should succeed in recovery mode");
+
+    // Creditor split is skipped because settlement already has children.
+    assert_eq!(creditor_api.splits_received.lock().unwrap().len(), 0);
+    // Debtor split happens normally.
+    assert_eq!(debtor_api.splits_received.lock().unwrap().len(), 1);
+
+    // Existing children should be cleared.
+    let creditor_updates = creditor_api.updates_received.lock().unwrap();
+    let cleared_ids: Vec<_> = creditor_updates
+        .iter()
+        .filter(|(_, u)| u.status == Some(TransactionStatus::Cleared))
+        .map(|(id, _)| *id)
+        .collect();
+    assert!(cleared_ids.contains(&50), "settlement parent should be cleared");
+    assert!(cleared_ids.contains(&500), "existing child 500 should be cleared");
+    assert!(cleared_ids.contains(&501), "existing child 501 should be cleared");
+
+    // Batch saved as reconciled.
+    let saved = persistence.saved_batches();
+    let reconciled = saved.iter().find(|b| b.id == "recovery-creditor").unwrap();
+    assert!(reconciled.reconciliation.is_some());
+}
+
+#[tokio::test]
+async fn reconcile_skips_split_when_debtor_settlement_already_split() {
+    let config = test_config();
+
+    let batch_txn = test_transaction(10, 1500)
+        .with_payee("Store")
+        .with_date(2025, 3, 1);
+
+    let settlement_credit = test_transaction(50, -1500)
+        .with_account(1000)
+        .with_date(2025, 3, 5)
+        .with_status(TransactionStatus::Uncleared);
+    // Debtor settlement already split (no children needed in mock — debtor children aren't fetched).
+    let settlement_debit = test_transaction(60, 1500)
+        .with_account(2000)
+        .with_date(2025, 3, 5)
+        .with_children()
+        .with_status(TransactionStatus::Uncleared);
+
+    let creditor_api = MockLunchMoney::new(vec![batch_txn, settlement_credit]);
+    let debtor_api = MockLunchMoney::new(vec![settlement_debit]);
+
+    let batch = Batch {
+        id: "recovery-debtor".to_string(),
+        amount: USD::new_from_cents(1500),
+        transaction_ids: vec![10],
+        reconciliation: None,
+    };
+    let persistence = InMemoryPersistence::with_batches(vec![batch]);
+
+    equailizer::commands::reconcile::reconcile_batch_name(
+        "recovery-debtor",
+        &config,
+        &creditor_api,
+        &debtor_api,
+        &persistence,
+        &mut PluginManager::empty(),
+    )
+    .await
+    .expect("reconcile should succeed");
+
+    // Creditor split happens normally.
+    assert_eq!(creditor_api.splits_received.lock().unwrap().len(), 1);
+    // Debtor split is skipped.
+    assert_eq!(debtor_api.splits_received.lock().unwrap().len(), 0);
+
+    // Debtor parent still gets cleared (it was uncleared).
+    let debtor_clears: Vec<_> = debtor_api
+        .updates_received
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(_, u)| u.status == Some(TransactionStatus::Cleared))
+        .map(|(id, _)| *id)
+        .collect();
+    assert_eq!(debtor_clears, vec![60]);
+}
+
+#[tokio::test]
+async fn reconcile_skips_clearing_already_cleared_settlement_parent() {
+    let config = test_config();
+
+    let batch_txn = test_transaction(10, 1500)
+        .with_payee("Store")
+        .with_date(2025, 3, 1);
+
+    // Both settlement parents already cleared.
+    let settlement_credit = test_transaction(50, -1500)
+        .with_account(1000)
+        .with_date(2025, 3, 5)
+        .with_status(TransactionStatus::Cleared);
+    let settlement_debit = test_transaction(60, 1500)
+        .with_account(2000)
+        .with_date(2025, 3, 5)
+        .with_status(TransactionStatus::Cleared);
+
+    let creditor_api = MockLunchMoney::new(vec![batch_txn, settlement_credit]);
+    let debtor_api = MockLunchMoney::new(vec![settlement_debit]);
+
+    let batch = Batch {
+        id: "skip-already-cleared".to_string(),
+        amount: USD::new_from_cents(1500),
+        transaction_ids: vec![10],
+        reconciliation: None,
+    };
+    let persistence = InMemoryPersistence::with_batches(vec![batch]);
+
+    equailizer::commands::reconcile::reconcile_batch_name(
+        "skip-already-cleared",
+        &config,
+        &creditor_api,
+        &debtor_api,
+        &persistence,
+        &mut PluginManager::empty(),
+    )
+    .await
+    .expect("reconcile should succeed");
+
+    // No clear call for settlement parent 50.
+    let creditor_cleared_ids: Vec<_> = creditor_api
+        .updates_received
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(_, u)| u.status == Some(TransactionStatus::Cleared))
+        .map(|(id, _)| *id)
+        .collect();
+    assert!(
+        !creditor_cleared_ids.contains(&50),
+        "settlement parent should not be re-cleared"
+    );
+
+    // No clear call for settlement parent 60.
+    let debtor_cleared_ids: Vec<_> = debtor_api
+        .updates_received
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(_, u)| u.status == Some(TransactionStatus::Cleared))
+        .map(|(id, _)| *id)
+        .collect();
+    assert!(
+        !debtor_cleared_ids.contains(&60),
+        "settlement parent should not be re-cleared"
+    );
+}
+
+#[tokio::test]
+async fn reconcile_skips_already_cleared_split_children() {
+    let config = test_config();
+
+    let batch_txn_1 = test_transaction(10, 1000).with_date(2025, 3, 1);
+    let batch_txn_2 = test_transaction(11, 1000).with_date(2025, 3, 2);
+    let batch_txn_3 = test_transaction(12, 1000).with_date(2025, 3, 3);
+    let batch_txn_4 = test_transaction(13, 1000).with_date(2025, 3, 4);
+    let batch_txn_5 = test_transaction(14, 1000).with_date(2025, 3, 5);
+
+    // Creditor settlement already split with mixed-status children.
+    let settlement_credit = test_transaction(50, -5000)
+        .with_account(1000)
+        .with_date(2025, 3, 7)
+        .with_children();
+    let cleared_child_1 = test_transaction(500, -1000)
+        .with_parent(50)
+        .with_date(2025, 3, 1)
+        .with_status(TransactionStatus::Cleared);
+    let cleared_child_2 = test_transaction(501, -1000)
+        .with_parent(50)
+        .with_date(2025, 3, 2)
+        .with_status(TransactionStatus::Cleared);
+    let cleared_child_3 = test_transaction(502, -1000)
+        .with_parent(50)
+        .with_date(2025, 3, 3)
+        .with_status(TransactionStatus::Cleared);
+    let uncleared_child_1 = test_transaction(503, -1000)
+        .with_parent(50)
+        .with_date(2025, 3, 4)
+        .with_status(TransactionStatus::Uncleared);
+    let uncleared_child_2 = test_transaction(504, -1000)
+        .with_parent(50)
+        .with_date(2025, 3, 5)
+        .with_status(TransactionStatus::Uncleared);
+
+    let settlement_debit = test_transaction(60, 5000)
+        .with_account(2000)
+        .with_date(2025, 3, 7);
+
+    let creditor_api = MockLunchMoney::new(vec![
+        batch_txn_1,
+        batch_txn_2,
+        batch_txn_3,
+        batch_txn_4,
+        batch_txn_5,
+        settlement_credit,
+        cleared_child_1,
+        cleared_child_2,
+        cleared_child_3,
+        uncleared_child_1,
+        uncleared_child_2,
+    ]);
+    let debtor_api = MockLunchMoney::new(vec![settlement_debit]);
+
+    let batch = Batch {
+        id: "partial-children".to_string(),
+        amount: USD::new_from_cents(5000),
+        transaction_ids: vec![10, 11, 12, 13, 14],
+        reconciliation: None,
+    };
+    let persistence = InMemoryPersistence::with_batches(vec![batch]);
+
+    equailizer::commands::reconcile::reconcile_batch_name(
+        "partial-children",
+        &config,
+        &creditor_api,
+        &debtor_api,
+        &persistence,
+        &mut PluginManager::empty(),
+    )
+    .await
+    .expect("reconcile should succeed");
+
+    let cleared_ids: Vec<_> = creditor_api
+        .updates_received
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(_, u)| u.status == Some(TransactionStatus::Cleared))
+        .map(|(id, _)| *id)
+        .collect();
+    // Only the two uncleared children should be cleared.
+    assert!(cleared_ids.contains(&503));
+    assert!(cleared_ids.contains(&504));
+    assert!(!cleared_ids.contains(&500));
+    assert!(!cleared_ids.contains(&501));
+    assert!(!cleared_ids.contains(&502));
+}
+
+#[tokio::test]
+async fn reconcile_full_recovery_after_partial_failure() {
+    // End-to-end recovery scenario mirroring the real-world batch 7569a14c:
+    // - both settlements split
+    // - creditor parent already cleared
+    // - some creditor children cleared, some not
+    // - debtor parent uncleared
+    let config = test_config();
+
+    let batch_txn_1 = test_transaction(10, 1500).with_date(2025, 3, 1);
+    let batch_txn_2 = test_transaction(11, 2500).with_date(2025, 3, 2);
+
+    let settlement_credit = test_transaction(50, -4000)
+        .with_account(1000)
+        .with_date(2025, 3, 5)
+        .with_children()
+        .with_status(TransactionStatus::Cleared); // already cleared
+    let creditor_child_cleared = test_transaction(500, -1500)
+        .with_parent(50)
+        .with_date(2025, 3, 1)
+        .with_status(TransactionStatus::Cleared);
+    let creditor_child_uncleared = test_transaction(501, -2500)
+        .with_parent(50)
+        .with_date(2025, 3, 2)
+        .with_status(TransactionStatus::Uncleared);
+
+    let settlement_debit = test_transaction(60, 4000)
+        .with_account(2000)
+        .with_date(2025, 3, 5)
+        .with_children()
+        .with_status(TransactionStatus::Uncleared); // not yet cleared
+
+    let creditor_api = MockLunchMoney::new(vec![
+        batch_txn_1,
+        batch_txn_2,
+        settlement_credit,
+        creditor_child_cleared,
+        creditor_child_uncleared,
+    ]);
+    let debtor_api = MockLunchMoney::new(vec![settlement_debit]);
+
+    let batch = Batch {
+        id: "real-recovery".to_string(),
+        amount: USD::new_from_cents(4000),
+        transaction_ids: vec![10, 11],
+        reconciliation: None,
+    };
+    let persistence = InMemoryPersistence::with_batches(vec![batch]);
+
+    equailizer::commands::reconcile::reconcile_batch_name(
+        "real-recovery",
+        &config,
+        &creditor_api,
+        &debtor_api,
+        &persistence,
+        &mut PluginManager::empty(),
+    )
+    .await
+    .expect("recovery reconcile should succeed");
+
+    // Neither side should re-split.
+    assert_eq!(creditor_api.splits_received.lock().unwrap().len(), 0);
+    assert_eq!(debtor_api.splits_received.lock().unwrap().len(), 0);
+
+    let creditor_cleared: Vec<_> = creditor_api
+        .updates_received
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(_, u)| u.status == Some(TransactionStatus::Cleared))
+        .map(|(id, _)| *id)
+        .collect();
+    // Settlement parent (50) already cleared → not re-cleared.
+    assert!(!creditor_cleared.contains(&50));
+    // Cleared child (500) already cleared → not re-cleared.
+    assert!(!creditor_cleared.contains(&500));
+    // Uncleared child (501) gets cleared.
+    assert!(creditor_cleared.contains(&501));
+
+    let debtor_cleared: Vec<_> = debtor_api
+        .updates_received
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(_, u)| u.status == Some(TransactionStatus::Cleared))
+        .map(|(id, _)| *id)
+        .collect();
+    // Debtor parent (60) was uncleared → now cleared.
+    assert_eq!(debtor_cleared, vec![60]);
+
+    // Batch persisted as reconciled.
+    let saved = persistence.saved_batches();
+    let reconciled = saved.iter().find(|b| b.id == "real-recovery").unwrap();
+    let settlement = reconciled
+        .reconciliation
+        .as_ref()
+        .expect("batch should be reconciled");
+    assert_eq!(settlement.settlement_credit_id, 50);
+    assert_eq!(settlement.settlement_debit_id, 60);
+}
+
+#[tokio::test]
+async fn reconcile_errors_on_child_count_mismatch() {
+    let config = test_config();
+
+    let batch_txn_1 = test_transaction(10, 1500).with_date(2025, 3, 1);
+    let batch_txn_2 = test_transaction(11, 2500).with_date(2025, 3, 2);
+
+    let settlement_credit = test_transaction(50, -4000)
+        .with_account(1000)
+        .with_date(2025, 3, 5)
+        .with_children();
+    // Only one existing child; batch has two transactions → mismatch.
+    let only_child = test_transaction(500, -1500)
+        .with_parent(50)
+        .with_date(2025, 3, 1);
+
+    let settlement_debit = test_transaction(60, 4000)
+        .with_account(2000)
+        .with_date(2025, 3, 5);
+
+    let creditor_api = MockLunchMoney::new(vec![
+        batch_txn_1,
+        batch_txn_2,
+        settlement_credit,
+        only_child,
+    ]);
+    let debtor_api = MockLunchMoney::new(vec![settlement_debit]);
+
+    let batch = Batch {
+        id: "mismatch".to_string(),
+        amount: USD::new_from_cents(4000),
+        transaction_ids: vec![10, 11],
+        reconciliation: None,
+    };
+    let persistence = InMemoryPersistence::with_batches(vec![batch]);
+
+    let result = equailizer::commands::reconcile::reconcile_batch_name(
+        "mismatch",
+        &config,
+        &creditor_api,
+        &debtor_api,
+        &persistence,
+        &mut PluginManager::empty(),
+    )
+    .await;
+
+    let err = result.expect_err("reconcile should fail on count mismatch").to_string();
+    assert!(err.contains("expected 2"), "error was: {err}");
+    assert!(err.contains("found 1"), "error was: {err}");
+
+    // No clear calls were issued (fail fast).
+    assert!(creditor_api.updates_received.lock().unwrap().is_empty());
+    assert!(debtor_api.updates_received.lock().unwrap().is_empty());
+}
+

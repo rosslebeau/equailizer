@@ -157,28 +157,67 @@ async fn reconcile_batch(
         "Found debtor settlement"
     );
 
-    // Split out the creditor's side to match the transactions in the batch.
-    let creditor_splits = build_creditor_splits(
-        &batch_txns,
-        &config.debtor.name,
-        config.creditor.proxy_category_id,
-    );
-    let creditor_split_response = creditor_api
-        .update_split((settlement_credit.id, creditor_splits))
-        .await?;
+    // Split the creditor settlement, or recover existing children if a previous
+    // reconcile attempt was interrupted after splitting.
+    let creditor_split_ids_to_clear: Vec<TransactionId> = if settlement_credit.has_children {
+        tracing::info!(
+            parent_id = settlement_credit.id,
+            "Creditor settlement already split; reusing existing children"
+        );
+        let min_batch_date = batch_txns
+            .iter()
+            .map(|t| t.date)
+            .min()
+            .ok_or(Error::NoTransactionsFound)?;
+        let recovery_txns = creditor_api
+            .get_transactions(min_batch_date, search_end)
+            .await?;
+        let existing = find_existing_split_children(
+            &recovery_txns,
+            settlement_credit.id,
+            batch_txns.len(),
+        )?;
+        existing
+            .into_iter()
+            .filter(|t| t.status != TransactionStatus::Cleared)
+            .map(|t| t.id)
+            .collect()
+    } else {
+        let creditor_splits = build_creditor_splits(
+            &batch_txns,
+            &config.debtor.name,
+            config.creditor.proxy_category_id,
+        );
+        creditor_api
+            .update_split((settlement_credit.id, creditor_splits))
+            .await?
+            .split_ids
+    };
 
-    // Split out the debtor's side to match the transactions in the batch.
-    let debtor_splits = build_debtor_splits(&batch_txns);
-    debtor_api
-        .update_split((settlement_debit.id, debtor_splits))
-        .await?;
+    // Split the debtor settlement, or skip if a previous attempt already split it.
+    // We don't need debtor child IDs because we intentionally don't clear them.
+    if !settlement_debit.has_children {
+        let debtor_splits = build_debtor_splits(&batch_txns);
+        debtor_api
+            .update_split((settlement_debit.id, debtor_splits))
+            .await?;
+    } else {
+        tracing::info!(
+            parent_id = settlement_debit.id,
+            "Debtor settlement already split; skipping split call"
+        );
+    }
 
-    // Clear creditor settlement parent and split children.
-    clear_transactions(&[settlement_credit.id], creditor_api).await?;
-    clear_transactions(&creditor_split_response.split_ids, creditor_api).await?;
+    // Clear creditor settlement parent and uncleared split children.
+    if settlement_credit.status != TransactionStatus::Cleared {
+        clear_transactions(&[settlement_credit.id], creditor_api).await?;
+    }
+    clear_transactions(&creditor_split_ids_to_clear, creditor_api).await?;
     // Clear only the debtor settlement parent — leave split children uncleared
     // so the debtor can categorize them.
-    clear_transactions(&[settlement_debit.id], debtor_api).await?;
+    if settlement_debit.status != TransactionStatus::Cleared {
+        clear_transactions(&[settlement_debit.id], debtor_api).await?;
+    }
 
     // Remove the pending reconciliation tag from batch transactions.
     remove_pending_tags(&batch_txns, creditor_api).await?;
@@ -225,6 +264,29 @@ pub fn find_settlement_transaction(
             && t.plaid_account_id
                 .is_some_and(|acct| acct == settlement_account_id)
     })
+}
+
+/// Find existing split children of `parent_id` in `candidates`, used during
+/// recovery from an interrupted reconcile. Errors on count mismatch — a wrong
+/// count signals either a stale fetch window or a corrupted split state, and
+/// must be investigated manually rather than silently proceeding.
+pub fn find_existing_split_children(
+    candidates: &[Transaction],
+    parent_id: TransactionId,
+    expected_count: usize,
+) -> Result<Vec<Transaction>> {
+    let children: Vec<Transaction> = candidates
+        .iter()
+        .filter(|t| t.parent_id == Some(parent_id))
+        .cloned()
+        .collect();
+    if children.len() != expected_count {
+        return Err(Error::Api(format!(
+            "expected {expected_count} split children for transaction {parent_id}, found {}",
+            children.len()
+        )));
+    }
+    Ok(children)
 }
 
 /// Build creditor settlement splits: negative amounts, debtor name as payee, proxy category.
