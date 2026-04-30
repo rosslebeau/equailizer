@@ -4,7 +4,7 @@ use equailizer::commands::reconcile::{
     build_creditor_splits, build_debtor_splits, find_existing_split_children,
     find_settlement_transaction,
 };
-use equailizer::config::{self, Config, Creditor, Debtor, JMAP};
+use equailizer::config::{Config, Creditor, Debtor, JMAP};
 use equailizer::lunch_money::api::update_transaction::TransactionUpdateItem;
 use equailizer::lunch_money::model::transaction::TransactionStatus;
 use equailizer::persist::{Batch, Settlement};
@@ -452,19 +452,16 @@ async fn reconcile_all_continues_after_batch_failure() {
 }
 
 #[tokio::test]
-async fn reconcile_removes_pending_tag_from_batch_transactions() {
+async fn reconcile_does_not_modify_batch_transaction_tags() {
     let config = test_config();
-    let pending_tag = config::TAG_PENDING_RECONCILIATION;
 
-    // Batch transactions have the eq-pending tag (as they would after create_batch)
     let batch_txn_1 = test_transaction(10, 1500)
         .with_payee("Store A")
-        .with_date(2025, 3, 1)
-        .with_tags(vec![(pending_tag, 50)]);
+        .with_date(2025, 3, 1);
     let batch_txn_2 = test_transaction(11, 2500)
         .with_payee("Store B")
         .with_date(2025, 3, 2)
-        .with_tags(vec![(pending_tag, 50), ("external-tag", 51)]);
+        .with_tags(vec![("external-tag", 51)]);
 
     let settlement_credit = test_transaction(50, -4000)
         .with_account(1000)
@@ -498,12 +495,11 @@ async fn reconcile_removes_pending_tag_from_batch_transactions() {
     .await
     .expect("reconcile should succeed");
 
-    // Verify update_transaction was called for clearing and tag removal.
-    // Order: clear settlement parent (50), clear children (100, 101), then tag removals (10, 11).
+    // Reconcile only clears the settlement parent and split children — it must
+    // not touch tags on the batch transactions themselves.
     let updates = creditor_api.updates_received.lock().unwrap();
-    assert_eq!(updates.len(), 5);
+    assert_eq!(updates.len(), 3);
 
-    // First 3: clearing calls (settlement parent + 2 children)
     assert_eq!(updates[0].0, 50);
     assert_eq!(updates[0].1.status, Some(TransactionStatus::Cleared));
     assert_eq!(updates[1].0, 100);
@@ -511,12 +507,11 @@ async fn reconcile_removes_pending_tag_from_batch_transactions() {
     assert_eq!(updates[2].0, 101);
     assert_eq!(updates[2].1.status, Some(TransactionStatus::Cleared));
 
-    // Last 2: tag removal calls
-    assert_eq!(updates[3].0, 10);
-    assert_eq!(updates[3].1.tags, Some(vec![]));
-
-    assert_eq!(updates[4].0, 11);
-    assert_eq!(updates[4].1.tags, Some(vec!["external-tag".to_string()]));
+    // No update should target the batch transactions (10, 11).
+    for u in updates.iter() {
+        assert_ne!(u.0, 10);
+        assert_ne!(u.0, 11);
+    }
 }
 
 // ── find_existing_split_children pure function tests ─────────────────────

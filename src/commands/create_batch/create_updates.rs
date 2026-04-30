@@ -1,6 +1,5 @@
 use crate::{
     commands::create_batch::process_tags::ProcessTagsOutput,
-    config,
     lunch_money::{
         api::update_transaction::{
             SplitUpdateItem, TransactionAndSplitUpdate, TransactionUpdate, TransactionUpdateItem,
@@ -35,7 +34,7 @@ pub fn create_updates(
 fn create_add_updates(
     txns_to_add: Vec<Transaction>,
     proxy_category_id: u32,
-    add_tag: &String,
+    add_tag: &str,
 ) -> Vec<(Transaction, TransactionUpdate)> {
     txns_to_add
         .into_iter()
@@ -46,7 +45,7 @@ fn create_add_updates(
                     payee: None,
                     category_id: Some(proxy_category_id),
                     notes: None,
-                    tags: Some(tag_names_replacing(&txn.tags, add_tag)),
+                    tags: Some(tag_names_without(&txn.tags, add_tag)),
                     status: Some(TransactionStatus::Cleared),
                 },
             );
@@ -58,7 +57,7 @@ fn create_add_updates(
 fn create_split_updates(
     txns_to_split: Vec<Transaction>,
     proxy_category_id: u32,
-    split_tag: &String,
+    split_tag: &str,
 ) -> Vec<(Transaction, TransactionAndSplitUpdate)> {
     txns_to_split
         .into_iter()
@@ -77,7 +76,7 @@ fn create_split_updates(
                     payee: None,
                     category_id: None,
                     notes: None,
-                    tags: Some(tag_names_replacing(&txn.tags, &split_tag)),
+                    tags: Some(tag_names_without(&txn.tags, split_tag)),
                     status: Some(TransactionStatus::Cleared),
                 },
                 vec![creditor_split, debtor_split],
@@ -165,17 +164,12 @@ pub fn create_resplit_items(
     (split_items, debtor_amounts)
 }
 
-/// Remove the equailizer action tag and add the pending reconciliation tag.
-fn tag_names_replacing(tags: &Vec<Tag>, action_tag_to_remove: &String) -> Vec<String> {
-    let mut names: Vec<String> = tags
-        .iter()
+/// Return the transaction's tag names with the equailizer action tag removed.
+fn tag_names_without(tags: &[Tag], action_tag_to_remove: &str) -> Vec<String> {
+    tags.iter()
         .map(|tag| tag.name.clone())
         .filter(|name| name != action_tag_to_remove)
-        .collect();
-    if !names.contains(&config::TAG_PENDING_RECONCILIATION.to_string()) {
-        names.push(config::TAG_PENDING_RECONCILIATION.to_string());
-    }
-    names
+        .collect()
 }
 
 #[cfg(test)]
@@ -290,8 +284,6 @@ mod tests {
             proxy_category_id,
         );
 
-        let pending = config::TAG_PENDING_RECONCILIATION.to_string();
-
         let assert_add_updates = vec![
             (
                 add_t1,
@@ -301,7 +293,7 @@ mod tests {
                         payee: None,
                         category_id: Some(proxy_category_id),
                         notes: None,
-                        tags: Some(vec![pending.clone()]),
+                        tags: Some(vec![]),
                         status: Some(TransactionStatus::Cleared),
                     },
                 ),
@@ -314,7 +306,7 @@ mod tests {
                         payee: None,
                         category_id: Some(proxy_category_id),
                         notes: None,
-                        tags: Some(vec!["external-tag".to_string(), pending.clone()]),
+                        tags: Some(vec!["external-tag".to_string()]),
                         status: Some(TransactionStatus::Cleared),
                     },
                 ),
@@ -330,7 +322,7 @@ mod tests {
                         payee: None,
                         category_id: None,
                         notes: None,
-                        tags: Some(vec![pending.clone()]),
+                        tags: Some(vec![]),
                         status: Some(TransactionStatus::Cleared),
                     },
                     vec![
@@ -359,7 +351,7 @@ mod tests {
                         payee: None,
                         category_id: None,
                         notes: None,
-                        tags: Some(vec!["external-tag".to_string(), pending.clone()]),
+                        tags: Some(vec!["external-tag".to_string()]),
                         status: Some(TransactionStatus::Cleared),
                     },
                     vec![

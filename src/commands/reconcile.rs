@@ -1,5 +1,5 @@
 use crate::{
-    config::{self, Config},
+    config::Config,
     date_helpers,
     error::{Error, Result},
     lunch_money::{
@@ -219,9 +219,6 @@ async fn reconcile_batch(
         clear_transactions(&[settlement_debit.id], debtor_api).await?;
     }
 
-    // Remove the pending reconciliation tag from batch transactions.
-    remove_pending_tags(&batch_txns, creditor_api).await?;
-
     // Dispatch to plugins before saving (which moves batch fields).
     plugins
         .dispatch(&crate::plugin::batch_reconciled_message(
@@ -340,44 +337,5 @@ async fn clear_transactions(
         .await?;
     }
     tracing::debug!(count = ids.len(), ?ids, "Cleared transactions");
-    Ok(())
-}
-
-/// Remove the pending reconciliation tag from each batch transaction.
-async fn remove_pending_tags(
-    batch_txns: &[Transaction],
-    api: &(impl LunchMoney + Sync),
-) -> Result<()> {
-    let pending_tag = config::TAG_PENDING_RECONCILIATION;
-    let mut removed = 0u32;
-
-    for txn in batch_txns {
-        if !txn.tag_names().contains(&&pending_tag.to_string()) {
-            continue;
-        }
-
-        let tags: Vec<String> = txn
-            .tags
-            .iter()
-            .map(|t| t.name.clone())
-            .filter(|name| name != pending_tag)
-            .collect();
-
-        api.update_transaction((
-            txn.id,
-            TransactionUpdateItem {
-                payee: None,
-                category_id: None,
-                notes: None,
-                tags: Some(tags),
-                status: None,
-            },
-        ))
-        .await?;
-
-        removed += 1;
-    }
-
-    tracing::info!(removed, total = batch_txns.len(), "Removed pending reconciliation tags");
     Ok(())
 }
