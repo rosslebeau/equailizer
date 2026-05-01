@@ -2,6 +2,7 @@ mod support;
 
 use equailizer::commands::create_batch::create_batch;
 use equailizer::config::{Config, Creditor, Debtor, JMAP};
+use equailizer::lunch_money::model::transaction::TransactionStatus;
 use equailizer::usd::USD;
 use support::builders::{test_transaction, TransactionBuilder};
 use equailizer::plugin::PluginManager;
@@ -394,13 +395,17 @@ async fn create_batch_resplits_child_transaction() {
     assert_eq!(unsplits.len(), 1);
     assert_eq!(unsplits[0], 100);
 
-    // Verify update_split was called on the parent (not update_transaction_and_split)
-    let splits = api.splits_received.lock().unwrap();
-    assert_eq!(splits.len(), 1);
-    assert_eq!(splits[0].0, 100); // parent ID
+    // Verify update_transaction_and_split was called on the parent — the parent
+    // update marks it Cleared (children inherit) and leaves tags untouched.
+    let updates = api.update_and_splits_received.lock().unwrap();
+    assert_eq!(updates.len(), 1);
+    assert_eq!(updates[0].0, 100); // parent ID
+    assert_eq!(updates[0].1.status, Some(TransactionStatus::Cleared));
+    assert_eq!(updates[0].1.tags, None);
+    assert_eq!(api.splits_received.lock().unwrap().len(), 0);
 
     // Split items should be: [creditor_half, debtor_half, sibling]
-    let split_items = &splits[0].1;
+    let split_items = &updates[0].2;
     assert_eq!(split_items.len(), 3);
 
     // Creditor half: half of $20, original category
@@ -458,9 +463,9 @@ async fn create_batch_resplit_skips_when_unsplit_fails() {
         .await
         .expect("create_batch should succeed even if a resplit fails");
 
-    // Unsplit was attempted but failed; update_split must NOT be called.
+    // Unsplit was attempted but failed; the parent update + split must NOT be called.
     assert_eq!(api.unsplits_received.lock().unwrap().len(), 1);
-    assert_eq!(api.splits_received.lock().unwrap().len(), 0);
+    assert_eq!(api.update_and_splits_received.lock().unwrap().len(), 0);
 
     // Batch was still saved (with no transactions from the failed resplit).
     let batches = persistence.saved_batches();
@@ -495,9 +500,9 @@ async fn create_batch_resplit_logs_failure_when_split_fails_after_unsplit() {
         .with_payee("Restaurant")
         .with_category(42, "Dining");
 
-    // Unsplit succeeds (default), but update_split fails.
+    // Unsplit succeeds (default), but update_transaction_and_split fails.
     let api = MockLunchMoney::new(vec![parent, tagged_child, sibling])
-        .with_failing_splits(vec![100]);
+        .with_failing_update_and_splits(vec![100]);
     let persistence = InMemoryPersistence::new();
     let notifier = RecordingBatchNotifier::new();
 
@@ -508,9 +513,9 @@ async fn create_batch_resplit_logs_failure_when_split_fails_after_unsplit() {
         .await
         .expect("create_batch should succeed even if split fails after unsplit");
 
-    // Both unsplit and split were attempted.
+    // Both unsplit and the parent update + split were attempted.
     assert_eq!(api.unsplits_received.lock().unwrap().len(), 1);
-    assert_eq!(api.splits_received.lock().unwrap().len(), 1);
+    assert_eq!(api.update_and_splits_received.lock().unwrap().len(), 1);
 
     // No transactions made it into the batch.
     let batches = persistence.saved_batches();
@@ -521,5 +526,5 @@ async fn create_batch_resplit_logs_failure_when_split_fails_after_unsplit() {
     let calls = notifier.calls.lock().unwrap();
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0].warnings.len(), 1);
-    assert!(calls[0].warnings[0].contains("mock split failure"));
+    assert!(calls[0].warnings[0].contains("mock update_and_split failure"));
 }

@@ -8,10 +8,10 @@ use crate::email::{BatchNotifier, Txn};
 use crate::error::{Error, Result};
 use crate::issue::Issue;
 use crate::lunch_money::api::update_transaction::{
-    TransactionAndSplitUpdate, TransactionUpdate,
+    TransactionAndSplitUpdate, TransactionUpdate, TransactionUpdateItem,
 };
 use crate::lunch_money::api::LunchMoney;
-use crate::lunch_money::model::transaction::{Transaction, TransactionId};
+use crate::lunch_money::model::transaction::{Transaction, TransactionId, TransactionStatus};
 use crate::persist::{Batch, Persistence};
 use crate::plugin::PluginManager;
 use crate::usd::USD;
@@ -297,7 +297,20 @@ async fn execute_resplits(
             continue;
         }
 
-        let result = api.update_split((parent_id, split_items)).await;
+        // Use update_transaction_and_split (instead of bare update_split) so we
+        // can mark the parent Cleared in the same call. The new child splits
+        // inherit the parent's cleared status from the Lunch Money API,
+        // matching the visible state of normal-split children in the UI.
+        let parent_update = TransactionUpdateItem {
+            payee: None,
+            category_id: None,
+            notes: None,
+            tags: None,
+            status: Some(TransactionStatus::Cleared),
+        };
+        let result = api
+            .update_transaction_and_split((parent_id, parent_update, split_items))
+            .await;
 
         match result {
             Ok(split_response) => {

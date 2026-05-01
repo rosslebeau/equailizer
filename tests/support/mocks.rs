@@ -23,6 +23,7 @@ pub struct MockLunchMoney {
     pub next_split_ids: Mutex<Vec<Vec<TransactionId>>>,
     pub fail_update_for_ids: Mutex<Vec<TransactionId>>,
     pub fail_split_for_parent_ids: Mutex<Vec<TransactionId>>,
+    pub fail_update_and_split_for_parent_ids: Mutex<Vec<TransactionId>>,
     pub fail_unsplit_for_parent_ids: Mutex<Vec<TransactionId>>,
     pub updates_received: Mutex<Vec<TransactionUpdate>>,
     pub splits_received: Mutex<Vec<SplitUpdate>>,
@@ -37,6 +38,7 @@ impl MockLunchMoney {
             next_split_ids: Mutex::new(vec![]),
             fail_update_for_ids: Mutex::new(vec![]),
             fail_split_for_parent_ids: Mutex::new(vec![]),
+            fail_update_and_split_for_parent_ids: Mutex::new(vec![]),
             fail_unsplit_for_parent_ids: Mutex::new(vec![]),
             updates_received: Mutex::new(vec![]),
             splits_received: Mutex::new(vec![]),
@@ -60,6 +62,12 @@ impl MockLunchMoney {
     /// Make `update_split` return an error for the given parent IDs.
     pub fn with_failing_splits(self, parent_ids: Vec<TransactionId>) -> Self {
         *self.fail_split_for_parent_ids.lock().unwrap() = parent_ids;
+        self
+    }
+
+    /// Make `update_transaction_and_split` return an error for the given parent IDs.
+    pub fn with_failing_update_and_splits(self, parent_ids: Vec<TransactionId>) -> Self {
+        *self.fail_update_and_split_for_parent_ids.lock().unwrap() = parent_ids;
         self
     }
 
@@ -129,10 +137,19 @@ impl LunchMoney for MockLunchMoney {
         &self,
         update: TransactionAndSplitUpdate,
     ) -> Result<SplitResponse> {
+        let parent_id = update.0;
+        let should_fail = self
+            .fail_update_and_split_for_parent_ids
+            .lock()
+            .unwrap()
+            .contains(&parent_id);
         self.update_and_splits_received
             .lock()
             .unwrap()
             .push(update);
+        if should_fail {
+            return Err(Error::Api("mock update_and_split failure".to_string()));
+        }
         let ids = self
             .next_split_ids
             .lock()
