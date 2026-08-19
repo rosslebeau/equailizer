@@ -528,3 +528,29 @@ async fn create_batch_resplit_logs_failure_when_split_fails_after_unsplit() {
     assert_eq!(calls[0].warnings.len(), 1);
     assert!(calls[0].warnings[0].contains("mock update_and_split failure"));
 }
+
+#[tokio::test]
+async fn create_batch_notifies_with_saved_batch_id() {
+    let config = test_config();
+    let txns = vec![test_transaction(1, 1500)
+        .with_tags(vec![("eq-to-batch", 10)])
+        .with_date(2025, 3, 1)
+        .with_payee("Store A")];
+
+    let api = MockLunchMoney::new(txns);
+    let persistence = InMemoryPersistence::new();
+    let notifier = RecordingBatchNotifier::new();
+
+    let start = chrono::NaiveDate::from_ymd_opt(2025, 3, 1).unwrap();
+    let end = chrono::NaiveDate::from_ymd_opt(2025, 3, 31).unwrap();
+
+    create_batch(start, end, &config, &api, &persistence, &notifier, &mut PluginManager::empty())
+        .await
+        .expect("create_batch should succeed");
+
+    // The id in the notification must be the id the batch was saved under —
+    // it's what `reconcile --batch-name` looks up.
+    let batches = persistence.saved_batches();
+    let calls = notifier.calls.lock().unwrap();
+    assert_eq!(calls[0].batch_id, batches[0].id);
+}

@@ -122,10 +122,11 @@ pub async fn create_batch(
             },
         );
 
-    // Create batch id and save to local data.
+    // Create batch id and save to local data. The same id must flow into the
+    // notification and plugins — it's what `reconcile --batch-name` looks up.
     let batch_id = Uuid::new_v4().to_string();
     let batch: Batch = Batch {
-        id: Uuid::new_v4().to_string(),
+        id: batch_id.clone(),
         amount: total_amount,
         transaction_ids: batched_ids.clone(),
         reconciliation: None,
